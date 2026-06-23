@@ -95,35 +95,35 @@ Deferred to future release. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| IMPT-01 | — | Pending |
-| IMPT-02 | — | Pending |
-| IMPT-03 | — | Pending |
-| IMPT-04 | — | Pending |
-| IMPT-05 | — | Pending |
-| IMPT-06 | — | Pending |
-| CATG-01 | — | Pending |
-| CATG-02 | — | Pending |
-| CATG-03 | — | Pending |
-| CATG-04 | — | Pending |
-| CURR-01 | — | Pending |
-| CURR-02 | — | Pending |
-| CURR-03 | — | Pending |
-| TRNV-01 | — | Pending |
-| TRNV-02 | — | Pending |
-| TRNV-03 | — | Pending |
-| BUDG-01 | — | Pending |
-| BUDG-02 | — | Pending |
-| BUDG-03 | — | Pending |
-| BUDG-04 | — | Pending |
-| BUDG-05 | — | Pending |
-| STOR-01 | — | Pending |
-| STOR-02 | — | Pending |
+| STOR-01 | Phase 1 | Pending |
+| STOR-02 | Phase 1 | Pending |
+| IMPT-01 | Phase 2 | Pending |
+| IMPT-02 | Phase 2 | Pending |
+| IMPT-03 | Phase 2 | Pending |
+| IMPT-04 | Phase 2 | Pending |
+| IMPT-05 | Phase 2 | Pending |
+| IMPT-06 | Phase 2 | Pending |
+| CATG-01 | Phase 3 | Pending |
+| CATG-02 | Phase 3 | Pending |
+| CATG-03 | Phase 3 | Pending |
+| CATG-04 | Phase 3 | Pending |
+| CURR-01 | Phase 3 | Pending |
+| CURR-02 | Phase 3 | Pending |
+| CURR-03 | Phase 3 | Pending |
+| TRNV-01 | Phase 4 | Pending |
+| TRNV-02 | Phase 4 | Pending |
+| TRNV-03 | Phase 4 | Pending |
+| BUDG-01 | Phase 5 | Pending |
+| BUDG-02 | Phase 5 | Pending |
+| BUDG-03 | Phase 5 | Pending |
+| BUDG-04 | Phase 5 | Pending |
+| BUDG-05 | Phase 5 | Pending |
 
 **Coverage:**
 - v1 requirements: 23 total
-- Mapped to phases: 0
-- Unmapped: 23 ⚠️
+- Mapped to phases: 23
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-23*
-*Last updated: 2026-06-23 after initial definition*
+*Last updated: 2026-06-23 after roadmap creation*
