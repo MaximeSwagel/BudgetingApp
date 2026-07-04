@@ -7,6 +7,23 @@ logger = logging.getLogger(__name__)
 
 _rate_cache: dict[str, Decimal] = {}
 
+# Rough emergency-only USD valuations, used solely when the live Frankfurter
+# API call fails. Built from string literals to stay consistent with the
+# app's Decimal money convention (never from float).
+_FALLBACK_TO_USD: dict[str, Decimal] = {
+    "USD": Decimal("1"),
+    "EUR": Decimal("1.08"),
+    "ILS": Decimal("0.27"),
+    "DKK": Decimal("0.145"),
+}
+
+
+def _fallback_rate(from_currency: str, to_currency: str) -> Decimal:
+    if from_currency in _FALLBACK_TO_USD and to_currency in _FALLBACK_TO_USD:
+        return _FALLBACK_TO_USD[from_currency] / _FALLBACK_TO_USD[to_currency]
+    logger.error(f"No fallback rate available for unsupported currency pair: {from_currency}->{to_currency}")
+    return Decimal("1")
+
 
 async def get_exchange_rate(from_currency: str, to_currency: str, date_str: str | None = None) -> Decimal:
     if from_currency == to_currency:
@@ -22,16 +39,6 @@ async def get_exchange_rate(from_currency: str, to_currency: str, date_str: str 
 
     try:
         async with httpx.AsyncClient() as client:
-            if from_currency == "ILS" or to_currency == "ILS":
-                resp_from = await client.get(url, params={"from": from_currency, "to": "USD"})
-                resp_to = await client.get(url, params={"from": to_currency, "to": "USD"})
-                if resp_from.status_code == 200 and resp_to.status_code == 200:
-                    from_usd = Decimal(str(resp_from.json()["rates"]["USD"]))
-                    to_usd = Decimal(str(resp_to.json()["rates"]["USD"]))
-                    rate = from_usd / to_usd
-                    _rate_cache[cache_key] = rate
-                    return rate
-
             resp = await client.get(url, params={"from": from_currency, "to": to_currency})
             if resp.status_code == 200:
                 data = resp.json()
@@ -41,15 +48,7 @@ async def get_exchange_rate(from_currency: str, to_currency: str, date_str: str 
     except Exception as e:
         logger.error(f"Currency conversion failed: {e}")
 
-    fallback_rates = {
-        ("EUR", "ILS"): Decimal("3.61"),
-        ("USD", "ILS"): Decimal("3.13"),
-        ("DKK", "ILS"): Decimal("0.48"),
-        ("ILS", "EUR"): Decimal("0.277"),
-        ("ILS", "USD"): Decimal("0.319"),
-        ("ILS", "DKK"): Decimal("2.08"),
-    }
-    rate = fallback_rates.get((from_currency, to_currency), Decimal("1"))
+    rate = _fallback_rate(from_currency, to_currency)
     _rate_cache[cache_key] = rate
     return rate
 
