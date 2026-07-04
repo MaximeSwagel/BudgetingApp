@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.models import Category, CategoryGroup, ImportBatch, Transaction
 from app.parsers import detect_bank_format, parse_credit_agricole, parse_revolut_en, parse_revolut_fr
@@ -50,7 +51,7 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
 
     categories = await categorize_transactions(parsed_transactions)
 
-    base_currency = "ILS"
+    base_currency = settings.base_currency
     imported_count = 0
     duplicates = 0
 
