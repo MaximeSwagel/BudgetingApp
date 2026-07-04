@@ -57,21 +57,46 @@ async def test_get_exchange_rate_falls_back_when_api_fails(monkeypatch):
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 
     rate = await currency.get_exchange_rate("EUR", "ILS")
-    assert rate == Decimal("3.61")
+    assert rate == currency._FALLBACK_TO_USD["EUR"] / currency._FALLBACK_TO_USD["ILS"]
 
 
 @pytest.mark.asyncio
-async def test_get_exchange_rate_ils_routes_via_usd(monkeypatch):
+async def test_get_exchange_rate_ils_uses_direct_request(monkeypatch):
+    calls = []
+
     async def fake_get(self, url, params=None, **kwargs):
-        rates = {"EUR": {"USD": 1.1}, "ILS": {"USD": 0.28}}
-        return httpx.Response(
-            200, json={"rates": {"USD": rates[params["from"]]["USD"]}}, request=httpx.Request("GET", url)
-        )
+        calls.append(params)
+        return httpx.Response(200, json={"rates": {"ILS": 3.9}}, request=httpx.Request("GET", url))
 
     monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 
     rate = await currency.get_exchange_rate("EUR", "ILS")
-    assert rate == Decimal("1.1") / Decimal("0.28")
+    assert len(calls) == 1
+    assert calls[0] == {"from": "EUR", "to": "ILS"}
+    assert rate == Decimal("3.9")
+
+
+@pytest.mark.asyncio
+async def test_fallback_non_ils_pair_is_not_one(monkeypatch):
+    async def fake_get(self, url, params=None, **kwargs):
+        raise httpx.ConnectError("network down")
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    rate = await currency.get_exchange_rate("USD", "DKK")
+    assert rate == currency._FALLBACK_TO_USD["USD"] / currency._FALLBACK_TO_USD["DKK"]
+    assert rate != Decimal("1")
+
+
+@pytest.mark.asyncio
+async def test_fallback_unsupported_currency_is_one(monkeypatch):
+    async def fake_get(self, url, params=None, **kwargs):
+        raise httpx.ConnectError("network down")
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
+
+    rate = await currency.get_exchange_rate("GBP", "EUR")
+    assert rate == Decimal("1")
 
 
 @pytest.mark.asyncio
