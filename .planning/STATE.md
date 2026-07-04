@@ -69,6 +69,12 @@ None yet.
 - Frankfurter API ILS support needs verification (Phase 3)
 - User's actual Excel budget file needed for calculation parity validation (Phase 5)
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260704-m0b | Fix Docker networking bug: vite dev-server proxy hardcodes localhost:8000, breaking /api/* under docker-compose | 2026-07-04 | 104ec0c | [260704-m0b-fix-docker-networking-bug-vite-dev-serve](./quick/260704-m0b-fix-docker-networking-bug-vite-dev-serve/) |
+
 ## Deferred Items
 
 Items acknowledged and carried forward from previous milestone close:
@@ -79,6 +85,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-23
-Stopped at: Roadmap created, ready to plan Phase 1
+Last session: 2026-07-04
+Stopped at: Completed quick task 260704-m0b (Docker networking fix); ready to plan Phase 1
 Resume file: None
