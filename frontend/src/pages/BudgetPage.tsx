@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getBudgetSummary } from "../api/client";
+import { formatMonthValue, formatPercent } from "../lib/format";
 
 interface CategoryData {
   name: string;
@@ -41,23 +42,8 @@ export default function BudgetPage() {
     loadBudget();
   }, [loadBudget]);
 
-  const fmt = (value: string | undefined) => {
-    if (!value) return "-";
-    const num = parseFloat(value);
-    if (num === 0) return "-";
-    return Math.abs(num).toLocaleString("en-IL", {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    });
-  };
-
-  const pct = (amount: string | undefined, _total: string | undefined) => {
-    if (!amount || !_total) return "";
-    const a = Math.abs(parseFloat(amount));
-    const t = Math.abs(parseFloat(_total));
-    if (t === 0) return "";
-    return `${((a / t) * 100).toFixed(1)}%`;
-  };
+  const fmt = formatMonthValue;
+  const pct = formatPercent;
 
   if (!data) return <div className="card">Loading...</div>;
 

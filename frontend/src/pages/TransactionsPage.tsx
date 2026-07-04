@@ -5,6 +5,7 @@ import {
   updateTransactionCategory,
   uploadCSV,
 } from "../api/client";
+import { formatAmount } from "../lib/format";
 
 interface Transaction {
   id: number;
@@ -77,15 +78,6 @@ export default function TransactionsPage() {
   const handleCategoryChange = async (txnId: number, categoryId: number) => {
     await updateTransactionCategory(txnId, categoryId);
     await loadData();
-  };
-
-  const formatAmount = (amount: string, isExpense: boolean) => {
-    const num = parseFloat(amount);
-    const formatted = Math.abs(num).toLocaleString("en-IL", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-    return isExpense || num < 0 ? `-${formatted}` : formatted;
   };
 
   const totalPages = Math.ceil(total / 50);
