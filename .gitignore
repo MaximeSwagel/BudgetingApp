@@ -12,3 +12,11 @@ venv/
 
 # GSD workflow bookkeeping (planning/roadmap state, not app code)
 .planning/
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/*.tfplan
+terraform/tfplan*
+terraform/*.auto.tfvars

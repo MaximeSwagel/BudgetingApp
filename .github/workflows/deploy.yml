@@ -1,0 +1,78 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write   # required to assume the AWS role via OIDC
+  contents: read
+
+env:
+  AWS_REGION: eu-north-1
+  APP_INSTANCE_ID: i-0aaeadc49af133d1f
+  ROLE_ARN: arn:aws:iam::183088117840:role/budgetingapp-github-actions-deploy
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push backend image
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -f backend/Dockerfile.prod -t "$REGISTRY/budgetingapp-backend:$IMAGE_TAG" backend
+          docker push "$REGISTRY/budgetingapp-backend:$IMAGE_TAG"
+
+      - name: Build and push frontend image
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -f frontend/Dockerfile.prod -t "$REGISTRY/budgetingapp-frontend:$IMAGE_TAG" frontend
+          docker push "$REGISTRY/budgetingapp-frontend:$IMAGE_TAG"
+
+      - name: Deploy to EC2 via SSM
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "$APP_INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[\"/opt/budgetingapp/deploy.sh ${{ github.sha }}\"]" \
+            --region "$AWS_REGION" \
+            --query "Command.CommandId" --output text)
+
+          echo "Waiting for deploy command $COMMAND_ID..."
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$APP_INSTANCE_ID" \
+            --region "$AWS_REGION" || true
+
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$APP_INSTANCE_ID" \
+            --region "$AWS_REGION" \
+            --output json
+
+          STATUS=$(aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "$APP_INSTANCE_ID" \
+            --region "$AWS_REGION" \
+            --query "Status" --output text)
+
+          if [ "$STATUS" != "Success" ]; then
+            echo "Deploy command finished with status: $STATUS"
+            exit 1
+          fi
