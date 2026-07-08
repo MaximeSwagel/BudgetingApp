@@ -10,7 +10,6 @@ permissions:
 
 env:
   AWS_REGION: eu-north-1
-  APP_INSTANCE_ID: i-0aaeadc49af133d1f
   ROLE_ARN: arn:aws:iam::183088117840:role/budgetingapp-github-actions-deploy
 
 jobs:
@@ -47,6 +46,14 @@ jobs:
 
       - name: Deploy to EC2 dev environment via SSM
         run: |
+          # Resolve the app instance by tag — instance IDs change on
+          # replacement, the Name tag doesn't.
+          APP_INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=budgetingapp-app" "Name=instance-state-name,Values=running" \
+            --region "$AWS_REGION" \
+            --query "Reservations[0].Instances[0].InstanceId" --output text)
+          echo "Deploying to $APP_INSTANCE_ID"
+
           IMAGE_TAG="dev-${{ github.sha }}"
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$APP_INSTANCE_ID" \

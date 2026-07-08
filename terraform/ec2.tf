@@ -69,3 +69,14 @@ resource "aws_instance" "app" {
     Name = "${var.project_name}-app"
   }
 }
+
+# Stable public address that survives instance replacement — DNS/bookmarks
+# keep working and nothing downstream has to learn a new IP.
+resource "aws_eip" "app" {
+  instance = aws_instance.app.id
+  domain   = "vpc"
+
+  tags = {
+    Name = "${var.project_name}-app-eip"
+  }
+}
