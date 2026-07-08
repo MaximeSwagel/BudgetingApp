@@ -1,8 +1,8 @@
-name: Build and Deploy
+name: Build and Deploy (dev)
 
 on:
   push:
-    branches: [main]
+    branches: [dev]
 
 permissions:
   id-token: write   # required to assume the AWS role via OIDC
@@ -32,7 +32,7 @@ jobs:
       - name: Build and push backend image
         env:
           REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
+          IMAGE_TAG: dev-${{ github.sha }}
         run: |
           docker build -f backend/Dockerfile.prod -t "$REGISTRY/budgetingapp-backend:$IMAGE_TAG" backend
           docker push "$REGISTRY/budgetingapp-backend:$IMAGE_TAG"
@@ -40,25 +40,22 @@ jobs:
       - name: Build and push frontend image
         env:
           REGISTRY: ${{ steps.ecr-login.outputs.registry }}
-          IMAGE_TAG: ${{ github.sha }}
+          IMAGE_TAG: dev-${{ github.sha }}
         run: |
           docker build -f frontend/Dockerfile.prod -t "$REGISTRY/budgetingapp-frontend:$IMAGE_TAG" frontend
           docker push "$REGISTRY/budgetingapp-frontend:$IMAGE_TAG"
 
-      - name: Deploy to EC2 via SSM
+      - name: Deploy to EC2 dev environment via SSM
         run: |
+          IMAGE_TAG="dev-${{ github.sha }}"
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids "$APP_INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
-            --parameters "commands=[\"/opt/budgetingapp/deploy.sh ${{ github.sha }}\"]" \
+            --parameters "commands=[\"/opt/budgetingapp-dev/deploy.sh $IMAGE_TAG\"]" \
             --region "$AWS_REGION" \
             --query "Command.CommandId" --output text)
 
           echo "Waiting for deploy command $COMMAND_ID..."
-          # Poll ourselves rather than relying on `aws ssm wait command-executed`'s
-          # default ~100s timeout — a cold image pull on a t3.micro can legitimately
-          # take longer than that, which previously caused this step to report
-          # failure while the deploy was still in progress and later succeeded.
           STATUS="Pending"
           for i in $(seq 1 60); do
             STATUS=$(aws ssm get-command-invocation \
