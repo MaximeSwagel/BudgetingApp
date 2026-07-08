@@ -1,10 +1,58 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
-from app.repositories import TransactionRepository
+from app.repositories import CategoryGroupRepository, CategoryRepository, TransactionRepository
+from app.services.categorizer import categorize_transactions, resolve_category_id
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
+
+# Bound one auto-categorize run so the HTTP request stays well under proxy
+# timeouts (~10 OpenAI calls); the response reports what's left to do.
+CATEGORIZE_BATCH_LIMIT = 300
+
+
+@router.post("/categorize")
+async def auto_categorize(db: AsyncSession = Depends(get_db)):
+    """Run the AI categorizer over transactions that still have no category
+    (e.g. imported while the OpenAI key/quota was missing)."""
+    if not settings.openai_api_key:
+        return {"error": "No OpenAI API key configured — add one, then retry."}
+
+    repo = TransactionRepository(db)
+    txns = await repo.list_uncategorized(limit=CATEGORIZE_BATCH_LIMIT)
+    if not txns:
+        return {"ok": True, "processed": 0, "categorized": 0, "remaining": 0}
+
+    payload = [
+        {
+            "description": t.description,
+            "original_amount": t.original_amount,
+            "original_currency": t.original_currency,
+            "bank": t.bank,
+        }
+        for t in txns
+    ]
+    results = await categorize_transactions(payload)
+
+    group_repo = CategoryGroupRepository(db)
+    category_repo = CategoryRepository(db)
+    categorized = 0
+    for txn, cat_data in zip(txns, results):
+        category_id = await resolve_category_id(cat_data, group_repo, category_repo)
+        if category_id is not None:
+            txn.category_id = category_id
+            categorized += 1
+
+    await repo.commit()
+    remaining = await repo.count_uncategorized()
+    return {
+        "ok": True,
+        "processed": len(txns),
+        "categorized": categorized,
+        "remaining": remaining,
+    }
 
 
 @router.get("")

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  autoCategorize,
   getCategories,
   getFeatures,
   getTransactions,
@@ -44,6 +45,7 @@ export default function TransactionsPage() {
   const [uploadResult, setUploadResult] = useState<Record<string, unknown> | null>(null);
   const [undoing, setUndoing] = useState(false);
   const [resetEnabled, setResetEnabled] = useState(false);
+  const [categorizing, setCategorizing] = useState(false);
   const [filters, setFilters] = useState({
     bank: "",
     currency: "",
@@ -93,6 +95,18 @@ export default function TransactionsPage() {
       result.ok
         ? { undone: true, deleted: result.deleted }
         : { error: String(result.error || "Undo failed") }
+    );
+    await loadData();
+  };
+
+  const handleAutoCategorize = async () => {
+    setCategorizing(true);
+    const result = await autoCategorize();
+    setCategorizing(false);
+    setUploadResult(
+      result.error
+        ? { error: String(result.error) }
+        : { autocat: true, categorized: result.categorized, remaining: result.remaining }
     );
     await loadData();
   };
@@ -148,6 +162,14 @@ export default function TransactionsPage() {
               Clear all data
             </button>
           )}
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleAutoCategorize}
+            disabled={categorizing}
+          >
+            {categorizing ? "Categorizing..." : "Auto-categorize (AI)"}
+          </button>
           <label className="btn btn-primary">
             {uploading ? "Uploading..." : "Upload CSV"}
             <input
@@ -170,6 +192,13 @@ export default function TransactionsPage() {
             <span>Error: {String(uploadResult.error)}</span>
           ) : uploadResult.undone ? (
             <span>Import undone — {String(uploadResult.deleted)} transactions removed.</span>
+          ) : uploadResult.autocat ? (
+            <span>
+              Auto-categorized {String(uploadResult.categorized)} transaction
+              {Number(uploadResult.categorized) === 1 ? "" : "s"}.
+              {Number(uploadResult.remaining) > 0 &&
+                ` ${String(uploadResult.remaining)} still uncategorized — run again or assign manually.`}
+            </span>
           ) : uploadResult.reset ? (
             <span>All data cleared — {String(uploadResult.deleted)} transactions removed.</span>
           ) : (

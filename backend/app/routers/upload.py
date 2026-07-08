@@ -9,7 +9,7 @@ from app.database import get_db
 from app.models import ImportBatch, Transaction
 from app.parsers import detect_bank_format, parse_credit_agricole, parse_revolut_en, parse_revolut_fr
 from app.repositories import CategoryGroupRepository, CategoryRepository, ImportBatchRepository, TransactionRepository
-from app.services.categorizer import categorize_transactions
+from app.services.categorizer import categorize_transactions, resolve_category_id
 from app.services.currency import convert_amount
 
 router = APIRouter(prefix="/api/upload", tags=["upload"])
@@ -74,21 +74,10 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
     duplicates = 0
 
     for txn_data, cat_data in zip(parsed_transactions, categories):
-        general_cat = cat_data.get("general_category", "Uncategorized")
-        precise_cat = cat_data.get("precise_category", "Uncategorized")
-
-        # Only assign a category when the categorizer produced a real group —
-        # a failed/skipped categorization stays NULL ("Uncategorized" in the UI)
-        # rather than being silently dumped into a wrong category.
-        category_id = None
-        if general_cat != "Uncategorized":
-            group = await group_repo.get_by_name(general_cat)
-            if group:
-                cat = await category_repo.get_by_name_in_group(precise_cat, group.id)
-                if not cat:
-                    cat = await category_repo.first_in_group(group.id)
-                if cat:
-                    category_id = cat.id
+        # A failed/skipped categorization resolves to None and stays NULL
+        # ("Uncategorized" in the UI) rather than being silently dumped into
+        # a wrong category.
+        category_id = await resolve_category_id(cat_data, group_repo, category_repo)
 
         orig_amount = txn_data["original_amount"]
         orig_currency = txn_data["original_currency"]

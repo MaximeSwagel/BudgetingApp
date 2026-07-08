@@ -76,6 +76,18 @@ class TransactionRepository(BaseRepository[Transaction]):
         )
         return result.scalar_one_or_none()
 
+    async def list_uncategorized(self, limit: int = 300) -> list[Transaction]:
+        result = await self.db.execute(
+            select(Transaction)
+            .where(
+                Transaction.category_id.is_(None),
+                Transaction.is_duplicate == False,  # noqa: E712
+            )
+            .order_by(Transaction.date.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def count_uncategorized(self) -> int:
         result = await self.db.execute(
             select(func.count())

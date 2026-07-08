@@ -29,6 +29,24 @@ ALL_CATEGORIES_TEXT = "\n".join(
 )
 
 
+async def resolve_category_id(cat_data: dict, group_repo, category_repo) -> int | None:
+    """Map a categorizer result to a category id, or None when it produced
+    nothing usable (the transaction then stays honestly uncategorized).
+    Shared by CSV upload and the bulk auto-categorize endpoint."""
+    general = cat_data.get("general_category", "Uncategorized")
+    precise = cat_data.get("precise_category", "Uncategorized")
+
+    if general == "Uncategorized":
+        return None
+    group = await group_repo.get_by_name(general)
+    if not group:
+        return None
+    cat = await category_repo.get_by_name_in_group(precise, group.id)
+    if not cat:
+        cat = await category_repo.first_in_group(group.id)
+    return cat.id if cat else None
+
+
 async def categorize_transactions(transactions: list[dict]) -> list[dict]:
     if not settings.openai_api_key:
         logger.warning("No OpenAI API key configured, skipping categorization")

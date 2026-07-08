@@ -99,6 +99,33 @@ describe("TransactionsPage", () => {
     expect(screen.queryByText("Clear all data")).not.toBeInTheDocument();
   });
 
+  it("auto-categorizes and reports the outcome", async () => {
+    vi.mocked(api.getTransactions).mockResolvedValue({ transactions: [], total: 0 });
+    vi.mocked(api.autoCategorize).mockResolvedValue({ ok: true, categorized: 12, remaining: 3 });
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Auto-categorize (AI)")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Auto-categorize (AI)"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Auto-categorized 12 transactions/)).toBeInTheDocument()
+    );
+    expect(screen.getByText(/3 still uncategorized/)).toBeInTheDocument();
+  });
+
+  it("surfaces the no-API-key error from auto-categorize", async () => {
+    vi.mocked(api.getTransactions).mockResolvedValue({ transactions: [], total: 0 });
+    vi.mocked(api.autoCategorize).mockResolvedValue({ error: "No OpenAI API key configured — add one, then retry." });
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Auto-categorize (AI)")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Auto-categorize (AI)"));
+
+    await waitFor(() => expect(screen.getByText(/No OpenAI API key configured/)).toBeInTheDocument());
+  });
+
   it("shows the clear-all button when enabled and clears after confirm", async () => {
     vi.mocked(api.getFeatures).mockResolvedValue({ data_reset: true });
     vi.mocked(api.getTransactions).mockResolvedValue({ transactions: [], total: 0 });

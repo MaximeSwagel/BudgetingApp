@@ -56,3 +56,8 @@ export async function resetAllData() {
   const res = await fetch(`${BASE}/admin/reset`, { method: "POST" });
   return res.json();
 }
+
+export async function autoCategorize() {
+  const res = await fetch(`${BASE}/transactions/categorize`, { method: "POST" });
+  return res.json();
+}
