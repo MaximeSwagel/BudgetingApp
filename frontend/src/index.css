@@ -112,6 +112,30 @@ body {
   background: #dee2e6;
 }
 
+.btn-danger {
+  background: #fdeaea;
+  color: #b02a37;
+  border: 1px solid #f1c2c7;
+}
+
+.btn-danger:hover {
+  background: #f8d7da;
+}
+
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.status-with-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+}
+
 .upload-zone {
   border: 2px dashed #ccc;
   border-radius: 8px;

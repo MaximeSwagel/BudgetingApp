@@ -41,3 +41,18 @@ export async function getDashboard() {
   const res = await fetch(`${BASE}/dashboard`);
   return res.json();
 }
+
+export async function undoImport(batchId: number) {
+  const res = await fetch(`${BASE}/upload/batches/${batchId}`, { method: "DELETE" });
+  return res.json();
+}
+
+export async function getFeatures() {
+  const res = await fetch(`${BASE}/admin/features`);
+  return res.json();
+}
+
+export async function resetAllData() {
+  const res = await fetch(`${BASE}/admin/reset`, { method: "POST" });
+  return res.json();
+}

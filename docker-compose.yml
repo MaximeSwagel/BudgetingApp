@@ -17,6 +17,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://budget:budget_dev@db:5432/budgetingapp
       OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ALLOW_DATA_RESET: "true"
     depends_on:
       - db
     volumes:

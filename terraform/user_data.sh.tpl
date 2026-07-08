@@ -83,6 +83,7 @@ IMAGE_TAG=latest
 DATABASE_URL=postgresql+asyncpg://${db_username}:$${DB_PASSWORD}@${db_endpoint}:${db_port}/${db_name}_dev
 OPENAI_API_KEY=$${OPENAI_API_KEY}
 BASE_CURRENCY=${base_currency}
+ALLOW_DATA_RESET=true
 EOF
 chmod 600 /opt/budgetingapp-dev/.env
 
@@ -98,6 +99,7 @@ services:
       DATABASE_URL: $${DATABASE_URL}
       OPENAI_API_KEY: $${OPENAI_API_KEY}
       BASE_CURRENCY: $${BASE_CURRENCY}
+      ALLOW_DATA_RESET: $${ALLOW_DATA_RESET:-false}
     networks: [app]
 
   frontend:

@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   getCategories,
+  getFeatures,
   getTransactions,
+  resetAllData,
+  undoImport,
   updateTransactionCategory,
   uploadCSV,
 } from "../api/client";
@@ -39,6 +42,8 @@ export default function TransactionsPage() {
   const [categories, setCategories] = useState<CategoryGroup[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<Record<string, unknown> | null>(null);
+  const [undoing, setUndoing] = useState(false);
+  const [resetEnabled, setResetEnabled] = useState(false);
   const [filters, setFilters] = useState({
     bank: "",
     currency: "",
@@ -72,6 +77,39 @@ export default function TransactionsPage() {
     loadData();
   }, [loadData]);
 
+  useEffect(() => {
+    getFeatures()
+      .then((f) => setResetEnabled(Boolean(f?.data_reset)))
+      .catch(() => setResetEnabled(false));
+  }, []);
+
+  const handleUndoImport = async () => {
+    const batchId = Number(uploadResult?.batch_id);
+    if (!batchId) return;
+    setUndoing(true);
+    const result = await undoImport(batchId);
+    setUndoing(false);
+    setUploadResult(
+      result.ok
+        ? { undone: true, deleted: result.deleted }
+        : { error: String(result.error || "Undo failed") }
+    );
+    await loadData();
+  };
+
+  const handleResetAll = async () => {
+    if (!window.confirm("Delete ALL transactions and imports? Categories are kept. This cannot be undone.")) {
+      return;
+    }
+    const result = await resetAllData();
+    setUploadResult(
+      result.ok
+        ? { reset: true, deleted: result.deleted }
+        : { error: String(result.detail || result.error || "Reset failed") }
+    );
+    await loadData();
+  };
+
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -104,7 +142,12 @@ export default function TransactionsPage() {
     <div>
       <div className="page-header">
         <h2>Transactions</h2>
-        <div>
+        <div className="header-actions">
+          {resetEnabled && (
+            <button type="button" className="btn btn-danger" onClick={handleResetAll}>
+              Clear all data
+            </button>
+          )}
           <label className="btn btn-primary">
             {uploading ? "Uploading..." : "Upload CSV"}
             <input
@@ -125,12 +168,28 @@ export default function TransactionsPage() {
         >
           {uploadResult.error ? (
             <span>Error: {String(uploadResult.error)}</span>
+          ) : uploadResult.undone ? (
+            <span>Import undone — {String(uploadResult.deleted)} transactions removed.</span>
+          ) : uploadResult.reset ? (
+            <span>All data cleared — {String(uploadResult.deleted)} transactions removed.</span>
           ) : (
-            <span>
-              Imported {String(uploadResult.imported)} transactions from{" "}
-              {String(uploadResult.bank)} ({String(uploadResult.format_detected)}).
-              {Number(uploadResult.duplicates_skipped) > 0 &&
-                ` ${String(uploadResult.duplicates_skipped)} duplicates skipped.`}
+            <span className="status-with-action">
+              <span>
+                Imported {String(uploadResult.imported)} transactions from{" "}
+                {String(uploadResult.bank)} ({String(uploadResult.format_detected)}).
+                {Number(uploadResult.duplicates_skipped) > 0 &&
+                  ` ${String(uploadResult.duplicates_skipped)} duplicates skipped.`}
+              </span>
+              {Number(uploadResult.imported) > 0 && uploadResult.batch_id != null && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleUndoImport}
+                  disabled={undoing}
+                >
+                  {undoing ? "Undoing..." : "Undo import"}
+                </button>
+              )}
             </span>
           )}
         </div>

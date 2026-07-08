@@ -6,7 +6,7 @@ from sqlalchemy import select
 
 from app.database import engine, async_session
 from app.models import Base, CategoryGroup, Category
-from app.routers import upload, transactions, categories, budget, dashboard
+from app.routers import upload, transactions, categories, budget, dashboard, admin
 
 logging.basicConfig(level=logging.INFO)
 
@@ -25,6 +25,7 @@ app.include_router(transactions.router)
 app.include_router(categories.router)
 app.include_router(budget.router)
 app.include_router(dashboard.router)
+app.include_router(admin.router)
 
 SEED_CATEGORIES = {
     "Home Expenses": ["Rent", "Utilities: Gas, Electric, Water", "Internet, TV"],

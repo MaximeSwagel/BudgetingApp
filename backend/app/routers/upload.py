@@ -15,6 +15,18 @@ from app.services.currency import convert_amount
 router = APIRouter(prefix="/api/upload", tags=["upload"])
 
 
+@router.delete("/batches/{batch_id}")
+async def undo_import(batch_id: int, db: AsyncSession = Depends(get_db)):
+    """Undo a CSV import: remove the batch and every transaction it created."""
+    repo = ImportBatchRepository(db)
+    batch = await repo.get(batch_id)
+    if not batch:
+        return {"error": "Import batch not found"}
+
+    deleted = await repo.delete_with_transactions(batch_id)
+    return {"ok": True, "deleted": deleted}
+
+
 @router.post("")
 async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
     content = await file.read()
