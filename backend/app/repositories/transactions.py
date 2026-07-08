@@ -18,6 +18,7 @@ class TransactionRepository(BaseRepository[Transaction]):
         currency: str | None = None,
         category_group: str | None = None,
         category: str | None = None,
+        uncategorized: bool = False,
         date_from: str | None = None,
         date_to: str | None = None,
         page: int = 1,
@@ -43,6 +44,8 @@ class TransactionRepository(BaseRepository[Transaction]):
             )
         if category:
             query = query.join(Transaction.category, isouter=True).where(Category.name == category)
+        if uncategorized:
+            query = query.where(Transaction.category_id.is_(None))
 
         count_query = select(func.count()).select_from(query.subquery())
         total = (await self.db.execute(count_query)).scalar() or 0
@@ -72,6 +75,58 @@ class TransactionRepository(BaseRepository[Transaction]):
             )
         )
         return result.scalar_one_or_none()
+
+    async def count_uncategorized(self) -> int:
+        result = await self.db.execute(
+            select(func.count())
+            .select_from(Transaction)
+            .where(
+                Transaction.category_id.is_(None),
+                Transaction.is_duplicate == False,  # noqa: E712
+            )
+        )
+        return result.scalar() or 0
+
+    async def monthly_totals_since(self, since: datetime):
+        """(year, month, is_expense, total) rows for all non-duplicate
+        transactions on/after `since`, in base-currency converted amounts."""
+        from sqlalchemy import extract
+
+        result = await self.db.execute(
+            select(
+                extract("year", Transaction.date).label("year"),
+                extract("month", Transaction.date).label("month"),
+                Transaction.is_expense,
+                func.sum(Transaction.converted_amount).label("total"),
+            )
+            .where(
+                Transaction.date >= since,
+                Transaction.is_duplicate == False,  # noqa: E712
+            )
+            .group_by("year", "month", Transaction.is_expense)
+        )
+        return result.all()
+
+    async def group_totals_for_month(self, year: int, month: int):
+        """(group_name, total) expense rows for one month, largest first."""
+        from sqlalchemy import extract
+
+        result = await self.db.execute(
+            select(
+                CategoryGroup.name.label("group_name"),
+                func.sum(Transaction.converted_amount).label("total"),
+            )
+            .join(Transaction.category)
+            .join(Category.group)
+            .where(
+                extract("year", Transaction.date) == year,
+                extract("month", Transaction.date) == month,
+                Transaction.is_expense == True,  # noqa: E712
+                Transaction.is_duplicate == False,  # noqa: E712
+            )
+            .group_by("group_name")
+        )
+        return result.all()
 
     async def monthly_category_totals(self, year: int):
         from sqlalchemy import extract

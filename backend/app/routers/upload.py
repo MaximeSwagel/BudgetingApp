@@ -65,17 +65,18 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
         general_cat = cat_data.get("general_category", "Uncategorized")
         precise_cat = cat_data.get("precise_category", "Uncategorized")
 
-        group = await group_repo.get_by_name(general_cat)
-        if not group:
-            group = await group_repo.get_by_name("Discretionary")
-
+        # Only assign a category when the categorizer produced a real group —
+        # a failed/skipped categorization stays NULL ("Uncategorized" in the UI)
+        # rather than being silently dumped into a wrong category.
         category_id = None
-        if group:
-            cat = await category_repo.get_by_name_in_group(precise_cat, group.id)
-            if not cat:
-                cat = await category_repo.first_in_group(group.id)
-            if cat:
-                category_id = cat.id
+        if general_cat != "Uncategorized":
+            group = await group_repo.get_by_name(general_cat)
+            if group:
+                cat = await category_repo.get_by_name_in_group(precise_cat, group.id)
+                if not cat:
+                    cat = await category_repo.first_in_group(group.id)
+                if cat:
+                    category_id = cat.id
 
         orig_amount = txn_data["original_amount"]
         orig_currency = txn_data["original_currency"]

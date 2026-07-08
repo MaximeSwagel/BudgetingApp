@@ -1,9 +1,18 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "../api/client";
 import TransactionsPage from "./TransactionsPage";
 
 vi.mock("../api/client");
+
+function renderPage() {
+  return render(
+    <MemoryRouter>
+      <TransactionsPage />
+    </MemoryRouter>
+  );
+}
 
 describe("TransactionsPage", () => {
   beforeEach(() => {
@@ -17,7 +26,7 @@ describe("TransactionsPage", () => {
   it("shows an empty state when there are no transactions", async () => {
     vi.mocked(api.getTransactions).mockResolvedValue({ transactions: [], total: 0 });
 
-    render(<TransactionsPage />);
+    renderPage();
 
     await waitFor(() =>
       expect(screen.getByText(/No transactions yet/i)).toBeInTheDocument()
@@ -46,7 +55,7 @@ describe("TransactionsPage", () => {
       ],
     });
 
-    render(<TransactionsPage />);
+    renderPage();
 
     await waitFor(() => expect(screen.getByText("Tesco")).toBeInTheDocument());
     expect(screen.getByText("-20.00")).toBeInTheDocument();

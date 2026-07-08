@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, NavLink } from "react-router-dom";
+import DashboardPage from "./pages/DashboardPage";
 import TransactionsPage from "./pages/TransactionsPage";
 import BudgetPage from "./pages/BudgetPage";
 import "./index.css";
@@ -13,14 +14,16 @@ function App() {
           <h1 className="logo">BudgetingApp</h1>
           <div className="nav-links">
             <NavLink to="/" end>
-              Transactions
+              Dashboard
             </NavLink>
+            <NavLink to="/transactions">Transactions</NavLink>
             <NavLink to="/budget">Budget</NavLink>
           </div>
         </nav>
         <main className="main">
           <Routes>
-            <Route path="/" element={<TransactionsPage />} />
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/transactions" element={<TransactionsPage />} />
             <Route path="/budget" element={<BudgetPage />} />
           </Routes>
         </main>

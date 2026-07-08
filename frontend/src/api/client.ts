@@ -36,3 +36,8 @@ export async function getBudgetSummary(year: number) {
   const res = await fetch(`${BASE}/budget/summary?year=${year}`);
   return res.json();
 }
+
+export async function getDashboard() {
+  const res = await fetch(`${BASE}/dashboard`);
+  return res.json();
+}

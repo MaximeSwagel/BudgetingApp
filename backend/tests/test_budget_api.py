@@ -23,10 +23,22 @@ async def test_budget_summary_empty_when_no_transactions(client):
     assert len(body["groups"]) > 0
 
 
+async def _categorize_all(client, category_id: int):
+    txns = (await client.get("/api/transactions", params={"uncategorized": "true", "page_size": "200"})).json()
+    for t in txns["transactions"]:
+        await client.patch(f"/api/transactions/{t['id']}/category", json={"category_id": category_id})
+
+
 @pytest.mark.asyncio
 async def test_budget_summary_aggregates_expenses_by_month(client):
     await client.post("/api/upload", files={"file": ("a.csv", io.BytesIO(JAN_EXPENSE_CSV.encode()), "text/csv")})
     await client.post("/api/upload", files={"file": ("b.csv", io.BytesIO(FEB_EXPENSE_CSV.encode()), "text/csv")})
+
+    # uploads without an OpenAI key stay uncategorized and are absent from the
+    # (category-joined) budget grid until assigned a category
+    categories_resp = await client.get("/api/categories")
+    first_category_id = categories_resp.json()[0]["categories"][0]["id"]
+    await _categorize_all(client, first_category_id)
 
     resp = await client.get("/api/budget/summary", params={"year": 2026})
     body = resp.json()

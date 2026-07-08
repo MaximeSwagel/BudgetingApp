@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   getCategories,
   getTransactions,
@@ -30,6 +31,8 @@ interface CategoryGroup {
 }
 
 export default function TransactionsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const uncategorizedOnly = searchParams.get("uncategorized") === "1";
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -47,13 +50,23 @@ export default function TransactionsPage() {
 
   const loadData = useCallback(async () => {
     const [txRes, catRes] = await Promise.all([
-      getTransactions({ ...filters, page: String(page), page_size: "50" }),
+      getTransactions({
+        ...filters,
+        uncategorized: uncategorizedOnly ? "true" : "",
+        page: String(page),
+        page_size: "50",
+      }),
       getCategories(),
     ]);
     setTransactions(txRes.transactions || []);
     setTotal(txRes.total || 0);
     setCategories(catRes || []);
-  }, [filters, page]);
+  }, [filters, page, uncategorizedOnly]);
+
+  const toggleUncategorized = () => {
+    setPage(1);
+    setSearchParams(uncategorizedOnly ? {} : { uncategorized: "1" });
+  };
 
   useEffect(() => {
     loadData();
@@ -178,6 +191,13 @@ export default function TransactionsPage() {
             }
             placeholder="To"
           />
+          <button
+            type="button"
+            className={`btn ${uncategorizedOnly ? "btn-primary" : "btn-secondary"}`}
+            onClick={toggleUncategorized}
+          >
+            {uncategorizedOnly ? "Showing uncategorized only ✕" : "Uncategorized only"}
+          </button>
         </div>
 
         <table>
