@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getAiModels, getAiSettings, updateAiSettings } from "../api/client";
+import { getAiModels, getAiSettings, getUploadLogs, updateAiSettings } from "../api/client";
 
 interface ModelInfo {
   id: string;
@@ -24,6 +24,20 @@ interface AiSettings {
   anthropic_model: string;
   openai_key_configured: boolean;
   anthropic_key_configured: boolean;
+}
+
+interface UploadLog {
+  id: number;
+  filename: string;
+  bank: string | null;
+  format_detected: string | null;
+  uploaded_at: string;
+  rows_parsed: number;
+  rows_imported: number;
+  rows_skipped: number;
+  rows_failed: number;
+  status: string;
+  error: string | null;
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -51,6 +65,7 @@ export default function SettingsPage() {
   const [anthropicModel, setAnthropicModel] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [logs, setLogs] = useState<UploadLog[]>([]);
 
   const loadData = async () => {
     const [s, m] = await Promise.all([getAiSettings(), getAiModels()]);
@@ -61,8 +76,16 @@ export default function SettingsPage() {
     setAnthropicModel(s.anthropic_model);
   };
 
+  const loadLogs = async () => {
+    const res = await getUploadLogs();
+    setLogs(res.logs || []);
+  };
+
+  // Loaded independently of loadData() so a slow/failed logs fetch never
+  // blocks the AI settings card (guarded by `!settings || !catalog` below).
   useEffect(() => {
     loadData();
+    loadLogs();
   }, []);
 
   const handleSave = async () => {
@@ -152,6 +175,51 @@ export default function SettingsPage() {
             </span>
           )}
         </div>
+      </div>
+
+      <div className="card">
+        <h3>Upload History</h3>
+        <table>
+          <thead>
+            <tr>
+              <th>Uploaded</th>
+              <th>File</th>
+              <th>Bank/Format</th>
+              <th>Parsed</th>
+              <th>Imported</th>
+              <th>Skipped</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {logs.map((log) => (
+              <tr key={log.id}>
+                <td>{new Date(log.uploaded_at).toLocaleString("en-GB")}</td>
+                <td>{log.filename}</td>
+                <td>{log.bank || log.format_detected || "-"}</td>
+                <td>{log.rows_parsed}</td>
+                <td>{log.rows_imported}</td>
+                <td>{log.rows_skipped}</td>
+                <td>
+                  {log.status === "success" ? (
+                    "Success"
+                  ) : (
+                    <span title={log.error ?? undefined}>
+                      Failed{log.error ? `: ${log.error}` : ""}
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {logs.length === 0 && (
+              <tr>
+                <td colSpan={7} style={{ textAlign: "center", padding: "2rem", color: "#888" }}>
+                  No uploads yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );

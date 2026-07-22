@@ -6,6 +6,10 @@
   box-sizing: border-box;
 }
 
+html, body {
+  overflow-x: hidden;
+}
+
 body {
   font-family: var(--font-sans);
   background: var(--color-bg);
@@ -13,7 +17,7 @@ body {
 }
 
 .app {
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -39,6 +43,24 @@ body {
 .nav-links {
   display: flex;
   gap: var(--space-4);
+}
+
+@media (max-width: 640px) {
+  .nav {
+    padding: 0 1rem;
+    gap: 1rem;
+  }
+
+  .nav-links {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 0.5rem;
+  }
+
+  .nav-links a {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
 }
 
 .nav-links a {
