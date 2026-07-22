@@ -31,8 +31,11 @@ const MONTHS = [
 ];
 
 export default function BudgetPage() {
-  const [year, setYear] = useState(2026);
+  const now = new Date();
+  const [year, setYear] = useState(now.getFullYear());
   const [data, setData] = useState<BudgetData | null>(null);
+  const currentMonthIdx = year === now.getFullYear() ? now.getMonth() : -1;
+  const monthClass = (i: number) => (i === currentMonthIdx ? "current-month" : "");
 
   const loadBudget = useCallback(async () => {
     const result = await getBudgetSummary(year);
@@ -74,8 +77,8 @@ export default function BudgetPage() {
             <thead>
               <tr>
                 <th>Category</th>
-                {MONTHS.map((m) => (
-                  <th key={m}>{m}</th>
+                {MONTHS.map((m, i) => (
+                  <th key={m} className={monthClass(i)}>{m}</th>
                 ))}
                 <th>Total {year}</th>
                 <th>% of Total</th>
@@ -99,7 +102,7 @@ export default function BudgetPage() {
                       {MONTHS.map((_, i) => {
                         const monthVal = cat.months[String(i + 1)];
                         return (
-                          <td key={i} className="amount-negative">
+                          <td key={i} className={`amount-negative ${monthClass(i)}`}>
                             {fmt(monthVal)}
                           </td>
                         );
@@ -113,7 +116,7 @@ export default function BudgetPage() {
                   <tr key={`total-${group.group}`} className="group-total">
                     <td>Total {group.group}</td>
                     {MONTHS.map((_, i) => (
-                      <td key={i} className="amount-negative">
+                      <td key={i} className={`amount-negative ${monthClass(i)}`}>
                         {fmt(group.monthly_totals[String(i + 1)])}
                       </td>
                     ))}

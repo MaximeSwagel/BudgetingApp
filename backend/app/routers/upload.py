@@ -2,17 +2,29 @@ from datetime import datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, File, UploadFile
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.models import Category, CategoryGroup, ImportBatch, Transaction
-from app.parsers import detect_bank_format, parse_credit_agricole, parse_revolut_en, parse_revolut_fr
-from app.services.categorizer import categorize_transactions
+from app.models import ImportBatch, Transaction
+from app.parsers import detect_bank_format, parse_credit_agricole, parse_leumi, parse_revolut_en, parse_revolut_fr
+from app.repositories import CategoryGroupRepository, CategoryRepository, ImportBatchRepository, TransactionRepository
+from app.services.categorizer import categorize_transactions, resolve_category_id
 from app.services.currency import convert_amount
 
 router = APIRouter(prefix="/api/upload", tags=["upload"])
+
+
+@router.delete("/batches/{batch_id}")
+async def undo_import(batch_id: int, db: AsyncSession = Depends(get_db)):
+    """Undo a CSV import: remove the batch and every transaction it created."""
+    repo = ImportBatchRepository(db)
+    batch = await repo.get(batch_id)
+    if not batch:
+        return {"error": "Import batch not found"}
+
+    deleted = await repo.delete_with_transactions(batch_id)
+    return {"ok": True, "deleted": deleted}
 
 
 @router.post("")
@@ -25,6 +37,7 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
         "revolut_fr": parse_revolut_fr,
         "revolut_en": parse_revolut_en,
         "ca": parse_credit_agricole,
+        "leumi": parse_leumi,
     }
 
     if format_type == "revolut_merged":
@@ -39,15 +52,21 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
     if not parsed_transactions:
         return {"error": "No valid transactions found in the CSV"}
 
+    batch_repo = ImportBatchRepository(db)
+    group_repo = CategoryGroupRepository(db)
+    category_repo = CategoryRepository(db)
+    txn_repo = TransactionRepository(db)
+
     bank = parsed_transactions[0]["bank"] if parsed_transactions else format_type
-    batch = ImportBatch(
-        filename=file.filename or "unknown.csv",
-        bank=bank,
-        imported_at=datetime.utcnow(),
-        transaction_count=0,
+    batch = batch_repo.add(
+        ImportBatch(
+            filename=file.filename or "unknown.csv",
+            bank=bank,
+            imported_at=datetime.utcnow(),
+            transaction_count=0,
+        )
     )
-    db.add(batch)
-    await db.flush()
+    await batch_repo.flush()
 
     categories = await categorize_transactions(parsed_transactions)
 
@@ -56,28 +75,10 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
     duplicates = 0
 
     for txn_data, cat_data in zip(parsed_transactions, categories):
-        general_cat = cat_data.get("general_category", "Uncategorized")
-        precise_cat = cat_data.get("precise_category", "Uncategorized")
-
-        group_result = await db.execute(select(CategoryGroup).where(CategoryGroup.name == general_cat))
-        group = group_result.scalar_one_or_none()
-        if not group:
-            group_result = await db.execute(select(CategoryGroup).where(CategoryGroup.name == "Discretionary"))
-            group = group_result.scalar_one_or_none()
-
-        category_id = None
-        if group:
-            cat_result = await db.execute(
-                select(Category).where(Category.name == precise_cat, Category.group_id == group.id)
-            )
-            cat = cat_result.scalar_one_or_none()
-            if not cat:
-                cat_result = await db.execute(
-                    select(Category).where(Category.group_id == group.id)
-                )
-                cat = cat_result.scalars().first()
-            if cat:
-                category_id = cat.id
+        # A failed/skipped categorization resolves to None and stays NULL
+        # ("Uncategorized" in the UI) rather than being silently dumped into
+        # a wrong category.
+        category_id = await resolve_category_id(cat_data, group_repo, category_repo)
 
         orig_amount = txn_data["original_amount"]
         orig_currency = txn_data["original_currency"]
@@ -91,40 +92,41 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
             converted = orig_amount
             rate = Decimal("1")
 
-        existing = await db.execute(
-            select(Transaction).where(
-                Transaction.date == txn_data["date"],
-                Transaction.original_amount == orig_amount,
-                Transaction.original_currency == orig_currency,
-                Transaction.bank == txn_data["bank"],
-                Transaction.description == txn_data["description"],
+        is_dup = (
+            await txn_repo.find_duplicate(
+                date=txn_data["date"],
+                amount=orig_amount,
+                currency=orig_currency,
+                bank=txn_data["bank"],
+                description=txn_data["description"],
             )
+            is not None
         )
-        is_dup = existing.scalar_one_or_none() is not None
 
         if is_dup:
             duplicates += 1
             continue
 
-        txn = Transaction(
-            date=txn_data["date"],
-            description=txn_data["description"],
-            original_amount=orig_amount,
-            original_currency=orig_currency,
-            converted_amount=converted,
-            exchange_rate=rate,
-            base_currency=base_currency,
-            bank=txn_data["bank"],
-            category_id=category_id,
-            import_batch_id=batch.id,
-            is_duplicate=False,
-            is_expense=txn_data.get("is_expense", orig_amount < 0),
+        txn_repo.add(
+            Transaction(
+                date=txn_data["date"],
+                description=txn_data["description"],
+                original_amount=orig_amount,
+                original_currency=orig_currency,
+                converted_amount=converted,
+                exchange_rate=rate,
+                base_currency=base_currency,
+                bank=txn_data["bank"],
+                category_id=category_id,
+                import_batch_id=batch.id,
+                is_duplicate=False,
+                is_expense=txn_data.get("is_expense", orig_amount < 0),
+            )
         )
-        db.add(txn)
         imported_count += 1
 
     batch.transaction_count = imported_count
-    await db.commit()
+    await batch_repo.commit()
 
     return {
         "format_detected": format_type,

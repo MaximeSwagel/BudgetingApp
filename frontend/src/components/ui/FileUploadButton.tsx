@@ -5,6 +5,7 @@ export interface FileUploadButtonProps {
   busyLabel: string;
   busy: boolean;
   accept: string;
+  multiple?: boolean;
   onChange: (event: ChangeEvent<HTMLInputElement>) => void;
   inputRef?: Ref<HTMLInputElement>;
 }
@@ -19,6 +20,7 @@ export default function FileUploadButton({
   busyLabel,
   busy,
   accept,
+  multiple,
   onChange,
   inputRef,
 }: FileUploadButtonProps) {
@@ -29,6 +31,7 @@ export default function FileUploadButton({
         ref={inputRef}
         type="file"
         accept={accept}
+        multiple={multiple}
         onChange={onChange}
         disabled={busy}
         className="file-input-hidden"

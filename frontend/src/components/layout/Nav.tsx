@@ -7,9 +7,11 @@ export default function Nav() {
       <h1 className="logo">BudgetingApp</h1>
       <div className="nav-links">
         <NavLink to="/" end>
-          Transactions
+          Dashboard
         </NavLink>
+        <NavLink to="/transactions">Transactions</NavLink>
         <NavLink to="/budget">Budget</NavLink>
+        <NavLink to="/settings">Settings</NavLink>
       </div>
     </nav>
   );

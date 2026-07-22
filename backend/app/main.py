@@ -6,7 +6,8 @@ from sqlalchemy import select
 
 from app.database import engine, async_session
 from app.models import Base, CategoryGroup, Category
-from app.routers import upload, transactions, categories, budget
+from app.repositories import UserSettingsRepository
+from app.routers import upload, transactions, categories, budget, dashboard, admin, settings as settings_router
 
 logging.basicConfig(level=logging.INFO)
 
@@ -24,6 +25,9 @@ app.include_router(upload.router)
 app.include_router(transactions.router)
 app.include_router(categories.router)
 app.include_router(budget.router)
+app.include_router(dashboard.router)
+app.include_router(admin.router)
+app.include_router(settings_router.router)
 
 SEED_CATEGORIES = {
     "Home Expenses": ["Rent", "Utilities: Gas, Electric, Water", "Internet, TV"],
@@ -57,6 +61,11 @@ async def startup():
                 for cat_order, cat_name in enumerate(cats):
                     session.add(Category(name=cat_name, group_id=group.id, display_order=cat_order))
             await session.commit()
+
+        # Apply any persisted AI settings overrides (provider/model choice) so
+        # they take effect on boot, not just after the next PUT /api/settings/ai.
+        overrides = await UserSettingsRepository(session).all_dict()
+        settings_router.apply_ai_settings_to_config(overrides)
 
 
 @app.get("/api/health")

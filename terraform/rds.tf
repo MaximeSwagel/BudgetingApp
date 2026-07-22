@@ -52,3 +52,9 @@ resource "aws_ssm_parameter" "openai_api_key" {
   type  = "SecureString"
   value = var.openai_api_key == "" ? "unset" : var.openai_api_key
 }
+
+resource "aws_ssm_parameter" "anthropic_api_key" {
+  name  = "/${var.project_name}/anthropic_api_key"
+  type  = "SecureString"
+  value = var.anthropic_api_key == "" ? "unset" : var.anthropic_api_key
+}

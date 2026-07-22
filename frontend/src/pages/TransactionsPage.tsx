@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
+  autoCategorize,
   getCategories,
+  getFeatures,
   getTransactions,
+  resetAllData,
+  undoImport,
   updateTransactionCategory,
   uploadCSV,
 } from "../api/client";
@@ -38,13 +43,29 @@ interface CategoryGroup {
   categories: { id: number; name: string }[];
 }
 
+interface UploadFileResult {
+  ok: boolean;
+  name: string;
+  imported?: number;
+  duplicates_skipped?: number;
+  bank?: string;
+  format_detected?: string;
+  error?: string;
+}
+
 export default function TransactionsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const uncategorizedOnly = searchParams.get("uncategorized") === "1";
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [categories, setCategories] = useState<CategoryGroup[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<Record<string, unknown> | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [undoing, setUndoing] = useState(false);
+  const [resetEnabled, setResetEnabled] = useState(false);
+  const [categorizing, setCategorizing] = useState(false);
   const [filters, setFilters] = useState({
     bank: "",
     currency: "",
@@ -56,21 +77,74 @@ export default function TransactionsPage() {
 
   const loadData = useCallback(async () => {
     const [txRes, catRes] = await Promise.all([
-      getTransactions({ ...filters, page: String(page), page_size: "50" }),
+      getTransactions({
+        ...filters,
+        uncategorized: uncategorizedOnly ? "true" : "",
+        page: String(page),
+        page_size: "50",
+      }),
       getCategories(),
     ]);
     setTransactions(txRes.transactions || []);
     setTotal(txRes.total || 0);
     setCategories(catRes || []);
-  }, [filters, page]);
+  }, [filters, page, uncategorizedOnly]);
+
+  const toggleUncategorized = () => {
+    setPage(1);
+    setSearchParams(uncategorizedOnly ? {} : { uncategorized: "1" });
+  };
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  useEffect(() => {
+    getFeatures()
+      .then((f) => setResetEnabled(Boolean(f?.data_reset)))
+      .catch(() => setResetEnabled(false));
+  }, []);
+
+  const handleUndoImport = async () => {
+    const batchId = Number(uploadResult?.batch_id);
+    if (!batchId) return;
+    setUndoing(true);
+    const result = await undoImport(batchId);
+    setUndoing(false);
+    setUploadResult(
+      result.ok
+        ? { undone: true, deleted: result.deleted }
+        : { error: String(result.error || "Undo failed") }
+    );
+    await loadData();
+  };
+
+  const handleAutoCategorize = async () => {
+    setCategorizing(true);
+    const result = await autoCategorize();
+    setCategorizing(false);
+    setUploadResult(
+      result.error
+        ? { error: String(result.error) }
+        : { autocat: true, categorized: result.categorized, remaining: result.remaining }
+    );
+    await loadData();
+  };
+
+  const handleResetAll = async () => {
+    if (!window.confirm("Delete ALL transactions and imports? Categories are kept. This cannot be undone.")) {
+      return;
+    }
+    const result = await resetAllData();
+    setUploadResult(
+      result.ok
+        ? { reset: true, deleted: result.deleted }
+        : { error: String(result.detail || result.error || "Reset failed") }
+    );
+    await loadData();
+  };
+
+  const uploadSingleFile = async (file: File) => {
     setUploading(true);
     setUploadResult(null);
     try {
@@ -82,6 +156,72 @@ export default function TransactionsPage() {
     }
     setUploading(false);
     if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const uploadMultipleFiles = async (files: File[]) => {
+    setUploading(true);
+    setUploadResult(null);
+    const results: UploadFileResult[] = [];
+    for (const file of files) {
+      try {
+        const result = await uploadCSV(file);
+        if (result.error) {
+          results.push({ ok: false, name: file.name, error: String(result.error) });
+        } else {
+          results.push({
+            ok: true,
+            name: file.name,
+            imported: result.imported,
+            duplicates_skipped: result.duplicates_skipped,
+            bank: result.bank,
+            format_detected: result.format_detected,
+          });
+        }
+      } catch (err) {
+        results.push({ ok: false, name: file.name, error: String(err) });
+      }
+    }
+    setUploadResult({ filesBatch: true, files: results });
+    await loadData();
+    setUploading(false);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const uploadFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+    if (files.length === 1) {
+      await uploadSingleFile(files[0]);
+    } else {
+      await uploadMultipleFiles(files);
+    }
+  };
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    await uploadFiles(Array.from(e.target.files ?? []));
+  };
+
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragActive(true);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragActive(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragActive(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragActive(false);
+    const csvFiles = Array.from(e.dataTransfer.files).filter((f) =>
+      f.name.toLowerCase().endsWith(".csv")
+    );
+    await uploadFiles(csvFiles);
   };
 
   const handleCategoryChange = async (txnId: number, categoryId: number) => {
@@ -96,32 +236,120 @@ export default function TransactionsPage() {
     ...new Set(transactions.map((t) => t.original_currency)),
   ];
 
+  const filesBatch = uploadResult?.filesBatch
+    ? (uploadResult.files as UploadFileResult[])
+    : null;
+
+  const batchSummary = filesBatch
+    ? (() => {
+        const successCount = filesBatch.filter((f) => f.ok).length;
+        const failCount = filesBatch.length - successCount;
+        const totalImported = filesBatch.reduce(
+          (sum, f) => sum + (f.ok ? f.imported ?? 0 : 0),
+          0
+        );
+        const totalDuplicates = filesBatch.reduce(
+          (sum, f) => sum + (f.ok ? f.duplicates_skipped ?? 0 : 0),
+          0
+        );
+        const failedNames = filesBatch
+          .filter((f) => !f.ok)
+          .map((f) => (f.error ? `${f.name} (${f.error})` : f.name))
+          .join(", ");
+        return { successCount, failCount, totalImported, totalDuplicates, failedNames };
+      })()
+    : null;
+
   return (
     <div>
       <PageHeader
         title="Transactions"
         actions={
-          <FileUploadButton
-            label="Upload CSV"
-            busyLabel="Uploading..."
-            busy={uploading}
-            accept=".csv"
-            onChange={handleUpload}
-            inputRef={fileRef}
-          />
+          <>
+            {resetEnabled && (
+              <button type="button" className="btn btn-danger" onClick={handleResetAll}>
+                Clear all data
+              </button>
+            )}
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleAutoCategorize}
+              disabled={categorizing}
+            >
+              {categorizing ? "Categorizing..." : "Auto-categorize (AI)"}
+            </button>
+          </>
         }
       />
 
+      <div
+        className={`upload-zone${dragActive ? " drag-active" : ""}`}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        <FileUploadButton
+          label="Upload CSV"
+          busyLabel="Uploading..."
+          busy={uploading}
+          accept=".csv"
+          multiple
+          onChange={handleUpload}
+          inputRef={fileRef}
+        />
+        <p>or drag &amp; drop CSV files here</p>
+      </div>
+
       {uploadResult && (
-        <StatusMessage variant={uploadResult.error ? "error" : "success"}>
+        <StatusMessage
+          variant={
+            uploadResult.error || (batchSummary && batchSummary.failCount > 0)
+              ? "error"
+              : "success"
+          }
+        >
           {uploadResult.error ? (
             <span>Error: {String(uploadResult.error)}</span>
-          ) : (
+          ) : batchSummary ? (
             <span>
-              Imported {String(uploadResult.imported)} transactions from{" "}
-              {String(uploadResult.bank)} ({String(uploadResult.format_detected)}).
-              {Number(uploadResult.duplicates_skipped) > 0 &&
-                ` ${String(uploadResult.duplicates_skipped)} duplicates skipped.`}
+              Imported {batchSummary.totalImported} transactions across{" "}
+              {batchSummary.successCount} file(s).
+              {batchSummary.totalDuplicates > 0 &&
+                ` ${batchSummary.totalDuplicates} duplicates skipped.`}
+              {batchSummary.failCount > 0 &&
+                ` ${batchSummary.failCount} file(s) failed: ${batchSummary.failedNames}.`}
+            </span>
+          ) : uploadResult.undone ? (
+            <span>Import undone — {String(uploadResult.deleted)} transactions removed.</span>
+          ) : uploadResult.autocat ? (
+            <span>
+              Auto-categorized {String(uploadResult.categorized)} transaction
+              {Number(uploadResult.categorized) === 1 ? "" : "s"}.
+              {Number(uploadResult.remaining) > 0 &&
+                ` ${String(uploadResult.remaining)} still uncategorized — run again or assign manually.`}
+            </span>
+          ) : uploadResult.reset ? (
+            <span>All data cleared — {String(uploadResult.deleted)} transactions removed.</span>
+          ) : (
+            <span className="status-with-action">
+              <span>
+                Imported {String(uploadResult.imported)} transactions from{" "}
+                {String(uploadResult.bank)} ({String(uploadResult.format_detected)}).
+                {Number(uploadResult.duplicates_skipped) > 0 &&
+                  ` ${String(uploadResult.duplicates_skipped)} duplicates skipped.`}
+              </span>
+              {Number(uploadResult.imported) > 0 && uploadResult.batch_id != null && (
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={handleUndoImport}
+                  disabled={undoing}
+                >
+                  {undoing ? "Undoing..." : "Undo import"}
+                </button>
+              )}
             </span>
           )}
         </StatusMessage>
@@ -139,8 +367,6 @@ export default function TransactionsPage() {
             {uniqueBanks.map((b) => (
               <option key={b}>{b}</option>
             ))}
-            <option value="Revolut">Revolut</option>
-            <option value="CA">CA</option>
           </select>
           <select
             value={filters.currency}
@@ -182,6 +408,13 @@ export default function TransactionsPage() {
             }
             placeholder="To"
           />
+          <button
+            type="button"
+            className={`btn ${uncategorizedOnly ? "btn-primary" : "btn-secondary"}`}
+            onClick={toggleUncategorized}
+          >
+            {uncategorizedOnly ? "Showing uncategorized only ✕" : "Uncategorized only"}
+          </button>
         </div>
 
         <TableContainer>

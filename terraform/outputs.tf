@@ -1,5 +1,6 @@
 output "app_public_ip" {
-  value = aws_instance.app.public_ip
+  description = "Stable Elastic IP — survives instance replacement"
+  value       = aws_eip.app.public_ip
 }
 
 output "app_instance_id" {

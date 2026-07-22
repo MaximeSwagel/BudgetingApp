@@ -86,3 +86,23 @@ class UserSettings(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     key: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     value: Mapped[str] = mapped_column(String(255), nullable=False)
+
+
+class UploadLog(Base):
+    """Append-only audit trail of every CSV upload attempt, success or
+    failure. Unlike ImportBatch (deleted on undo/reset), this table has no FK
+    to import_batches and is never deleted, so it survives undo/reset."""
+
+    __tablename__ = "upload_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    bank: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    format_detected: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    rows_parsed: Mapped[int] = mapped_column(Integer, default=0)
+    rows_imported: Mapped[int] = mapped_column(Integer, default=0)
+    rows_skipped: Mapped[int] = mapped_column(Integer, default=0)
+    rows_failed: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)

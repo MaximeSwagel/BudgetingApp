@@ -24,7 +24,10 @@ resource "aws_iam_role" "github_actions_deploy" {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:${var.github_repo}:ref:refs/heads/main"
+          "token.actions.githubusercontent.com:sub" = [
+            "repo:${var.github_repo}:ref:refs/heads/main",
+            "repo:${var.github_repo}:ref:refs/heads/dev",
+          ]
         }
       }
     }]
@@ -63,14 +66,26 @@ resource "aws_iam_role_policy" "github_actions_deploy" {
       {
         Sid    = "TriggerDeploy"
         Effect = "Allow"
-        Action = [
-          "ssm:SendCommand",
-          "ssm:GetCommandInvocation",
-        ]
+        Action = "ssm:SendCommand"
         Resource = [
           "arn:aws:ec2:${var.aws_region}:${data.aws_caller_identity.current.account_id}:instance/${aws_instance.app.id}",
           "arn:aws:ssm:${var.aws_region}::document/AWS-RunShellScript",
         ]
+      },
+      {
+        # GetCommandInvocation does not support resource-level permissions —
+        # scoping it to the instance ARN causes AccessDenied on every status
+        # poll, making deploys report failure even when they succeeded.
+        # DescribeInstances (also unscopeable, read-only) lets the workflow
+        # resolve the instance by tag instead of hardcoding an instance ID
+        # that goes stale on replacement.
+        Sid    = "ReadDeployStatus"
+        Effect = "Allow"
+        Action = [
+          "ssm:GetCommandInvocation",
+          "ec2:DescribeInstances",
+        ]
+        Resource = "*"
       },
     ]
   })

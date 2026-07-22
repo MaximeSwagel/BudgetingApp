@@ -1,12 +1,11 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
 
 from app.database import get_db
-from app.models import BudgetTarget, Category, CategoryGroup, Transaction
+from app.models import BudgetTarget
+from app.repositories import BudgetTargetRepository, CategoryGroupRepository, TransactionRepository
 
 router = APIRouter(prefix="/api/budget", tags=["budget"])
 
@@ -16,34 +15,14 @@ async def budget_summary(
     db: AsyncSession = Depends(get_db),
     year: int = Query(2026),
 ):
-    result = await db.execute(
-        select(
-            extract("month", Transaction.date).label("month"),
-            CategoryGroup.name.label("group_name"),
-            Category.name.label("category_name"),
-            func.sum(Transaction.converted_amount).label("total"),
-        )
-        .join(Transaction.category)
-        .join(Category.group)
-        .where(
-            extract("year", Transaction.date) == year,
-            Transaction.is_expense == True,  # noqa: E712
-            Transaction.is_duplicate == False,  # noqa: E712
-        )
-        .group_by("month", "group_name", "category_name")
-        .order_by("group_name", "category_name", "month")
-    )
-    rows = result.all()
+    txn_repo = TransactionRepository(db)
+    rows = await txn_repo.monthly_category_totals(year)
 
-    groups_result = await db.execute(
-        select(CategoryGroup).options(joinedload(CategoryGroup.categories)).order_by(CategoryGroup.display_order)
-    )
-    all_groups = groups_result.scalars().unique().all()
+    group_repo = CategoryGroupRepository(db)
+    all_groups = await group_repo.list_with_categories()
 
-    targets_result = await db.execute(
-        select(BudgetTarget).where(BudgetTarget.year == year)
-    )
-    targets = targets_result.scalars().all()
+    target_repo = BudgetTargetRepository(db)
+    targets = await target_repo.list_by_year(year)
     target_map = {(t.category_id, t.month): t.amount for t in targets}
 
     spending: dict[str, dict[str, dict[int, Decimal]]] = {}
@@ -111,25 +90,22 @@ async def budget_summary(
 
 @router.post("/targets")
 async def set_budget_target(body: dict, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(BudgetTarget).where(
-            BudgetTarget.category_id == body["category_id"],
-            BudgetTarget.year == body["year"],
-            BudgetTarget.month == body["month"],
-        )
+    repo = BudgetTargetRepository(db)
+    target = await repo.get_by_key(
+        category_id=body["category_id"], year=body["year"], month=body["month"]
     )
-    target = result.scalar_one_or_none()
 
     if target:
         target.amount = Decimal(str(body["amount"]))
     else:
-        target = BudgetTarget(
-            category_id=body["category_id"],
-            year=body["year"],
-            month=body["month"],
-            amount=Decimal(str(body["amount"])),
+        repo.add(
+            BudgetTarget(
+                category_id=body["category_id"],
+                year=body["year"],
+                month=body["month"],
+                amount=Decimal(str(body["amount"])),
+            )
         )
-        db.add(target)
 
-    await db.commit()
+    await repo.commit()
     return {"ok": True}
