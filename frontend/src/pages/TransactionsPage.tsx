@@ -6,6 +6,15 @@ import {
   uploadCSV,
 } from "../api/client";
 import { formatAmount } from "../lib/format";
+import {
+  Badge,
+  Card,
+  FileUploadButton,
+  Pagination,
+  PageHeader,
+  StatusMessage,
+  TableContainer,
+} from "../components/ui";
 
 interface Transaction {
   id: number;
@@ -89,27 +98,22 @@ export default function TransactionsPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <h2>Transactions</h2>
-        <div>
-          <label className="btn btn-primary">
-            {uploading ? "Uploading..." : "Upload CSV"}
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".csv"
-              onChange={handleUpload}
-              disabled={uploading}
-              style={{ display: "none" }}
-            />
-          </label>
-        </div>
-      </div>
+      <PageHeader
+        title="Transactions"
+        actions={
+          <FileUploadButton
+            label="Upload CSV"
+            busyLabel="Uploading..."
+            busy={uploading}
+            accept=".csv"
+            onChange={handleUpload}
+            inputRef={fileRef}
+          />
+        }
+      />
 
       {uploadResult && (
-        <div
-          className={`status-msg ${uploadResult.error ? "status-error" : "status-success"}`}
-        >
+        <StatusMessage variant={uploadResult.error ? "error" : "success"}>
           {uploadResult.error ? (
             <span>Error: {String(uploadResult.error)}</span>
           ) : (
@@ -120,10 +124,10 @@ export default function TransactionsPage() {
                 ` ${String(uploadResult.duplicates_skipped)} duplicates skipped.`}
             </span>
           )}
-        </div>
+        </StatusMessage>
       )}
 
-      <div className="card">
+      <Card>
         <div className="filters">
           <select
             value={filters.bank}
@@ -180,93 +184,80 @@ export default function TransactionsPage() {
           />
         </div>
 
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Description</th>
-              <th>Amount</th>
-              <th>Currency</th>
-              <th>Converted</th>
-              <th>Bank</th>
-              <th>Category</th>
-            </tr>
-          </thead>
-          <tbody>
-            {transactions.map((t) => (
-              <tr key={t.id}>
-                <td>{new Date(t.date).toLocaleDateString("en-GB")}</td>
-                <td>{t.description}</td>
-                <td className={t.is_expense ? "amount-negative" : "amount-positive"}>
-                  {formatAmount(t.original_amount, t.is_expense)}
-                </td>
-                <td>
-                  <span className="badge badge-currency">
-                    {t.original_currency}
-                  </span>
-                </td>
-                <td className={t.is_expense ? "amount-negative" : "amount-positive"}>
-                  {t.converted_amount
-                    ? `${formatAmount(t.converted_amount, t.is_expense)} ${t.base_currency}`
-                    : "-"}
-                </td>
-                <td>
-                  <span className="badge badge-bank">{t.bank}</span>
-                </td>
-                <td>
-                  <select
-                    className="category-select"
-                    value={t.category_id ?? ""}
-                    onChange={(e) =>
-                      handleCategoryChange(t.id, Number(e.target.value))
-                    }
-                  >
-                    <option value="">Uncategorized</option>
-                    {categories.map((g) => (
-                      <optgroup key={g.id} label={g.name}>
-                        {g.categories.map((c) => (
-                          <option key={c.id} value={c.id}>
-                            {c.name}
-                          </option>
-                        ))}
-                      </optgroup>
-                    ))}
-                  </select>
-                </td>
-              </tr>
-            ))}
-            {transactions.length === 0 && (
+        <TableContainer>
+          <table>
+            <thead>
               <tr>
-                <td colSpan={7} style={{ textAlign: "center", padding: "2rem", color: "#888" }}>
-                  No transactions yet. Upload a CSV to get started.
-                </td>
+                <th>Date</th>
+                <th>Description</th>
+                <th>Amount</th>
+                <th>Currency</th>
+                <th>Converted</th>
+                <th>Bank</th>
+                <th>Category</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {transactions.map((t) => (
+                <tr key={t.id}>
+                  <td>{new Date(t.date).toLocaleDateString("en-GB")}</td>
+                  <td>{t.description}</td>
+                  <td className={t.is_expense ? "amount-negative" : "amount-positive"}>
+                    {formatAmount(t.original_amount, t.is_expense)}
+                  </td>
+                  <td>
+                    <Badge variant="currency">{t.original_currency}</Badge>
+                  </td>
+                  <td className={t.is_expense ? "amount-negative" : "amount-positive"}>
+                    {t.converted_amount
+                      ? `${formatAmount(t.converted_amount, t.is_expense)} ${t.base_currency}`
+                      : "-"}
+                  </td>
+                  <td>
+                    <Badge variant="bank">{t.bank}</Badge>
+                  </td>
+                  <td>
+                    <select
+                      className="category-select"
+                      value={t.category_id ?? ""}
+                      onChange={(e) =>
+                        handleCategoryChange(t.id, Number(e.target.value))
+                      }
+                    >
+                      <option value="">Uncategorized</option>
+                      {categories.map((g) => (
+                        <optgroup key={g.id} label={g.name}>
+                          {g.categories.map((c) => (
+                            <option key={c.id} value={c.id}>
+                              {c.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+              {transactions.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="empty-state">
+                    No transactions yet. Upload a CSV to get started.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </TableContainer>
 
-        {totalPages > 1 && (
-          <div className="pagination">
-            <button
-              className="btn btn-secondary"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
-            >
-              Previous
-            </button>
-            <span>
-              Page {page} of {totalPages} ({total} transactions)
-            </span>
-            <button
-              className="btn btn-secondary"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Next
-            </button>
-          </div>
-        )}
-      </div>
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          total={total}
+          itemLabel="transactions"
+          onPrev={() => setPage((p) => p - 1)}
+          onNext={() => setPage((p) => p + 1)}
+        />
+      </Card>
     </div>
   );
 }
