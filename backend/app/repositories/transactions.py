@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -34,10 +34,25 @@ class TransactionRepository(BaseRepository[Transaction]):
             query = query.where(Transaction.bank == bank)
         if currency:
             query = query.where(Transaction.original_currency == currency)
+        # date_from/date_to arrive as "YYYY-MM-DD" strings from an HTML
+        # <input type="date">. `Transaction.date` is a DateTime column, so
+        # these must be parsed into real datetime boundaries before being
+        # bound as query params -- comparing a DateTime column directly
+        # against a raw string works "by accident" under SQLite (weak
+        # column typing) but raises `UndefinedFunctionError: operator does
+        # not exist: timestamp >= character varying` under PostgreSQL,
+        # which is the actual DB used in docker-compose. date_to is treated
+        # as inclusive of the whole day (< next midnight), not an exact
+        # midnight cutoff, so same-day transactions with a time component
+        # aren't silently dropped.
         if date_from:
-            query = query.where(Transaction.date >= date_from)
+            query = query.where(
+                Transaction.date >= datetime.combine(date.fromisoformat(date_from), time.min)
+            )
         if date_to:
-            query = query.where(Transaction.date <= date_to)
+            query = query.where(
+                Transaction.date < datetime.combine(date.fromisoformat(date_to), time.min) + timedelta(days=1)
+            )
         if category_group:
             query = query.join(Transaction.category).join(Category.group).where(
                 CategoryGroup.name == category_group
