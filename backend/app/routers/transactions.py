@@ -16,9 +16,12 @@ CATEGORIZE_BATCH_LIMIT = 300
 @router.post("/categorize")
 async def auto_categorize(db: AsyncSession = Depends(get_db)):
     """Run the AI categorizer over transactions that still have no category
-    (e.g. imported while the OpenAI key/quota was missing)."""
-    if not settings.openai_api_key:
-        return {"error": "No OpenAI API key configured — add one, then retry."}
+    (e.g. imported while the active provider's key/quota was missing)."""
+    provider = settings.ai_provider
+    active_key = settings.anthropic_api_key if provider == "anthropic" else settings.openai_api_key
+    if not active_key:
+        provider_label = "Anthropic" if provider == "anthropic" else "OpenAI"
+        return {"error": f"No {provider_label} API key configured — add one, then retry."}
 
     repo = TransactionRepository(db)
     txns = await repo.list_uncategorized(limit=CATEGORIZE_BATCH_LIMIT)
