@@ -80,3 +80,8 @@ export async function updateAiSettings(body: Record<string, string>) {
   });
   return res.json();
 }
+
+export async function getUploadLogs() {
+  const res = await fetch(`${BASE}/upload/logs`);
+  return res.json();
+}
