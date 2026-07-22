@@ -6,9 +6,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.models import ImportBatch, Transaction
+from app.models import ImportBatch, Transaction, UploadLog
 from app.parsers import detect_bank_format, parse_credit_agricole, parse_leumi, parse_revolut_en, parse_revolut_fr
-from app.repositories import CategoryGroupRepository, CategoryRepository, ImportBatchRepository, TransactionRepository
+from app.repositories import (
+    CategoryGroupRepository,
+    CategoryRepository,
+    ImportBatchRepository,
+    TransactionRepository,
+    UploadLogRepository,
+)
 from app.services.categorizer import categorize_transactions, resolve_category_id
 from app.services.currency import convert_amount
 
@@ -27,11 +33,68 @@ async def undo_import(batch_id: int, db: AsyncSession = Depends(get_db)):
     return {"ok": True, "deleted": deleted}
 
 
+@router.get("/logs")
+async def list_upload_logs(db: AsyncSession = Depends(get_db)):
+    """Append-only audit trail of every upload attempt (success and failure),
+    newest first. Independent of ImportBatch, so it survives undo/reset."""
+    repo = UploadLogRepository(db)
+    logs = await repo.list_recent()
+    return {
+        "logs": [
+            {
+                "id": log.id,
+                "filename": log.filename,
+                "bank": log.bank,
+                "format_detected": log.format_detected,
+                "uploaded_at": log.uploaded_at.isoformat(),
+                "rows_parsed": log.rows_parsed,
+                "rows_imported": log.rows_imported,
+                "rows_skipped": log.rows_skipped,
+                "rows_failed": log.rows_failed,
+                "status": log.status,
+                "error": log.error,
+            }
+            for log in logs
+        ]
+    }
+
+
+async def _record_failed_upload(
+    log_repo: UploadLogRepository,
+    *,
+    filename: str,
+    error: str,
+    bank: str | None = None,
+    format_detected: str | None = None,
+) -> None:
+    log_repo.add(
+        UploadLog(
+            filename=filename,
+            bank=bank,
+            format_detected=format_detected,
+            uploaded_at=datetime.utcnow(),
+            rows_parsed=0,
+            rows_imported=0,
+            rows_skipped=0,
+            rows_failed=0,
+            status="failed",
+            error=error,
+        )
+    )
+    await log_repo.commit()
+
+
 @router.post("")
 async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
     content = await file.read()
+    filename = file.filename or "unknown.csv"
+    log_repo = UploadLogRepository(db)
 
-    format_type = detect_bank_format(content)
+    try:
+        format_type = detect_bank_format(content)
+    except ValueError as e:
+        await _record_failed_upload(log_repo, filename=filename, error=str(e))
+        return {"error": str(e)}
 
     parsers = {
         "revolut_fr": parse_revolut_fr,
@@ -41,16 +104,22 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
     }
 
     if format_type == "revolut_merged":
-        return {"error": "Merged Revolut CSVs are not supported. Please upload per-currency account statements."}
+        error = "Merged Revolut CSVs are not supported. Please upload per-currency account statements."
+        await _record_failed_upload(log_repo, filename=filename, error=error, format_detected=format_type)
+        return {"error": error}
 
     parser = parsers.get(format_type)
     if not parser:
-        return {"error": f"Unsupported format: {format_type}"}
+        error = f"Unsupported format: {format_type}"
+        await _record_failed_upload(log_repo, filename=filename, error=error, format_detected=format_type)
+        return {"error": error}
 
     parsed_transactions = parser(content)
 
     if not parsed_transactions:
-        return {"error": "No valid transactions found in the CSV"}
+        error = "No valid transactions found in the CSV"
+        await _record_failed_upload(log_repo, filename=filename, error=error, format_detected=format_type)
+        return {"error": error}
 
     batch_repo = ImportBatchRepository(db)
     group_repo = CategoryGroupRepository(db)
@@ -60,7 +129,7 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
     bank = parsed_transactions[0]["bank"] if parsed_transactions else format_type
     batch = batch_repo.add(
         ImportBatch(
-            filename=file.filename or "unknown.csv",
+            filename=filename,
             bank=bank,
             imported_at=datetime.utcnow(),
             transaction_count=0,
@@ -126,6 +195,24 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
         imported_count += 1
 
     batch.transaction_count = imported_count
+
+    # rows_failed stays 0: the parsers silently drop malformed rows today and
+    # don't surface a per-row failure count (see SUMMARY for this limitation).
+    log_repo.add(
+        UploadLog(
+            filename=filename,
+            bank=bank,
+            format_detected=format_type,
+            uploaded_at=datetime.utcnow(),
+            rows_parsed=len(parsed_transactions),
+            rows_imported=imported_count,
+            rows_skipped=duplicates,
+            rows_failed=0,
+            status="success",
+        )
+    )
+
+    # Same session/transaction as the batch + imported transactions above.
     await batch_repo.commit()
 
     return {
