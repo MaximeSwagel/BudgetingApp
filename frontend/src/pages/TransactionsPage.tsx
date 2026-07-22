@@ -34,6 +34,16 @@ interface CategoryGroup {
   categories: { id: number; name: string }[];
 }
 
+interface UploadFileResult {
+  ok: boolean;
+  name: string;
+  imported?: number;
+  duplicates_skipped?: number;
+  bank?: string;
+  format_detected?: string;
+  error?: string;
+}
+
 export default function TransactionsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const uncategorizedOnly = searchParams.get("uncategorized") === "1";
@@ -43,6 +53,7 @@ export default function TransactionsPage() {
   const [categories, setCategories] = useState<CategoryGroup[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadResult, setUploadResult] = useState<Record<string, unknown> | null>(null);
+  const [dragActive, setDragActive] = useState(false);
   const [undoing, setUndoing] = useState(false);
   const [resetEnabled, setResetEnabled] = useState(false);
   const [categorizing, setCategorizing] = useState(false);
@@ -124,9 +135,7 @@ export default function TransactionsPage() {
     await loadData();
   };
 
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const uploadSingleFile = async (file: File) => {
     setUploading(true);
     setUploadResult(null);
     try {
@@ -140,6 +149,72 @@ export default function TransactionsPage() {
     if (fileRef.current) fileRef.current.value = "";
   };
 
+  const uploadMultipleFiles = async (files: File[]) => {
+    setUploading(true);
+    setUploadResult(null);
+    const results: UploadFileResult[] = [];
+    for (const file of files) {
+      try {
+        const result = await uploadCSV(file);
+        if (result.error) {
+          results.push({ ok: false, name: file.name, error: String(result.error) });
+        } else {
+          results.push({
+            ok: true,
+            name: file.name,
+            imported: result.imported,
+            duplicates_skipped: result.duplicates_skipped,
+            bank: result.bank,
+            format_detected: result.format_detected,
+          });
+        }
+      } catch (err) {
+        results.push({ ok: false, name: file.name, error: String(err) });
+      }
+    }
+    setUploadResult({ filesBatch: true, files: results });
+    await loadData();
+    setUploading(false);
+    if (fileRef.current) fileRef.current.value = "";
+  };
+
+  const uploadFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+    if (files.length === 1) {
+      await uploadSingleFile(files[0]);
+    } else {
+      await uploadMultipleFiles(files);
+    }
+  };
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    await uploadFiles(Array.from(e.target.files ?? []));
+  };
+
+  const handleDragEnter = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragActive(true);
+  };
+
+  const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragActive(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragActive(false);
+  };
+
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragActive(false);
+    const csvFiles = Array.from(e.dataTransfer.files).filter((f) =>
+      f.name.toLowerCase().endsWith(".csv")
+    );
+    await uploadFiles(csvFiles);
+  };
+
   const handleCategoryChange = async (txnId: number, categoryId: number) => {
     await updateTransactionCategory(txnId, categoryId);
     await loadData();
@@ -151,6 +226,30 @@ export default function TransactionsPage() {
   const uniqueCurrencies = [
     ...new Set(transactions.map((t) => t.original_currency)),
   ];
+
+  const filesBatch = uploadResult?.filesBatch
+    ? (uploadResult.files as UploadFileResult[])
+    : null;
+
+  const batchSummary = filesBatch
+    ? (() => {
+        const successCount = filesBatch.filter((f) => f.ok).length;
+        const failCount = filesBatch.length - successCount;
+        const totalImported = filesBatch.reduce(
+          (sum, f) => sum + (f.ok ? f.imported ?? 0 : 0),
+          0
+        );
+        const totalDuplicates = filesBatch.reduce(
+          (sum, f) => sum + (f.ok ? f.duplicates_skipped ?? 0 : 0),
+          0
+        );
+        const failedNames = filesBatch
+          .filter((f) => !f.ok)
+          .map((f) => (f.error ? `${f.name} (${f.error})` : f.name))
+          .join(", ");
+        return { successCount, failCount, totalImported, totalDuplicates, failedNames };
+      })()
+    : null;
 
   return (
     <div>
@@ -170,26 +269,50 @@ export default function TransactionsPage() {
           >
             {categorizing ? "Categorizing..." : "Auto-categorize (AI)"}
           </button>
-          <label className="btn btn-primary">
-            {uploading ? "Uploading..." : "Upload CSV"}
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".csv"
-              onChange={handleUpload}
-              disabled={uploading}
-              style={{ display: "none" }}
-            />
-          </label>
         </div>
+      </div>
+
+      <div
+        className={`upload-zone${dragActive ? " drag-active" : ""}`}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        <label className="btn btn-primary">
+          {uploading ? "Uploading..." : "Upload CSV"}
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv"
+            multiple
+            onChange={handleUpload}
+            disabled={uploading}
+            style={{ display: "none" }}
+          />
+        </label>
+        <p>or drag & drop CSV files here</p>
       </div>
 
       {uploadResult && (
         <div
-          className={`status-msg ${uploadResult.error ? "status-error" : "status-success"}`}
+          className={`status-msg ${
+            uploadResult.error || (batchSummary && batchSummary.failCount > 0)
+              ? "status-error"
+              : "status-success"
+          }`}
         >
           {uploadResult.error ? (
             <span>Error: {String(uploadResult.error)}</span>
+          ) : batchSummary ? (
+            <span>
+              Imported {batchSummary.totalImported} transactions across{" "}
+              {batchSummary.successCount} file(s).
+              {batchSummary.totalDuplicates > 0 &&
+                ` ${batchSummary.totalDuplicates} duplicates skipped.`}
+              {batchSummary.failCount > 0 &&
+                ` ${batchSummary.failCount} file(s) failed: ${batchSummary.failedNames}.`}
+            </span>
           ) : uploadResult.undone ? (
             <span>Import undone — {String(uploadResult.deleted)} transactions removed.</span>
           ) : uploadResult.autocat ? (
@@ -236,8 +359,6 @@ export default function TransactionsPage() {
             {uniqueBanks.map((b) => (
               <option key={b}>{b}</option>
             ))}
-            <option value="Revolut">Revolut</option>
-            <option value="CA">CA</option>
           </select>
           <select
             value={filters.currency}
