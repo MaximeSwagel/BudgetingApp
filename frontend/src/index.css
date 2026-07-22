@@ -522,6 +522,57 @@ tr:hover {
   white-space: nowrap;
 }
 
+/* ---------- Settings ---------- */
+
+.settings-grid {
+  display: grid;
+  gap: 1rem;
+  max-width: 640px;
+}
+
+.settings-field {
+  margin-bottom: 1.25rem;
+}
+
+.settings-field:last-child {
+  margin-bottom: 0;
+}
+
+.settings-label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 0.4rem;
+}
+
+.settings-model-option {
+  display: block;
+  font-size: 0.8rem;
+  color: #555;
+  margin-top: 0.4rem;
+}
+
+.key-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.key-status-ok {
+  background: #d4edda;
+  color: #155724;
+}
+
+.key-status-missing {
+  background: #fff3cd;
+  color: #856404;
+}
+
 /* current month column highlight in the budget grid */
 .budget-table th.current-month,
 .budget-table td.current-month {
