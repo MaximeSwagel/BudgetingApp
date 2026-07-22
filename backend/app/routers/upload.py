@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models import ImportBatch, Transaction
-from app.parsers import detect_bank_format, parse_credit_agricole, parse_revolut_en, parse_revolut_fr
+from app.parsers import detect_bank_format, parse_credit_agricole, parse_leumi, parse_revolut_en, parse_revolut_fr
 from app.repositories import CategoryGroupRepository, CategoryRepository, ImportBatchRepository, TransactionRepository
 from app.services.categorizer import categorize_transactions, resolve_category_id
 from app.services.currency import convert_amount
@@ -37,6 +37,7 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
         "revolut_fr": parse_revolut_fr,
         "revolut_en": parse_revolut_en,
         "ca": parse_credit_agricole,
+        "leumi": parse_leumi,
     }
 
     if format_type == "revolut_merged":
