@@ -144,6 +144,7 @@ body {
   cursor: pointer;
   transition: all 0.15s;
   background: #fafafa;
+  margin-bottom: 1.5rem;
 }
 
 .upload-zone:hover {
@@ -151,8 +152,19 @@ body {
   background: #f0f4ff;
 }
 
+.upload-zone.drag-active {
+  border-color: #4361ee;
+  background: #f0f4ff;
+}
+
 .upload-zone input {
   display: none;
+}
+
+.upload-zone p {
+  margin-top: 0.75rem;
+  color: #888;
+  font-size: 0.875rem;
 }
 
 .filters {
