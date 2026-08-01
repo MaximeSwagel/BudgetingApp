@@ -290,6 +290,17 @@ describe("TransactionsPage", () => {
     );
   });
 
+  it("marks the filter row and table wrapper as sticky-page containers", async () => {
+    vi.mocked(api.getTransactions).mockResolvedValue({ transactions: [], total: 0 });
+
+    const { container } = renderPage();
+
+    await waitFor(() => expect(screen.getByText(/No transactions yet/i)).toBeInTheDocument());
+    expect(container.querySelector(".transactions-toolbar")).toBeInTheDocument();
+    const tableWrapper = container.querySelector(".transactions-table.table-container--page-sticky");
+    expect(tableWrapper).toBeInTheDocument();
+  });
+
   it("preserves the URL's date params when toggling uncategorized only", async () => {
     vi.mocked(api.getTransactions).mockResolvedValue({ transactions: [], total: 0 });
 

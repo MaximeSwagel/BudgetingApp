@@ -6,7 +6,11 @@
   box-sizing: border-box;
 }
 
-html, body {
+/* Scoped to html only -- a non-visible overflow value on body would turn it
+   into a scroll container whose scrollport never scrolls (because the other
+   axis, left "visible", computes to "auto" once one axis isn't visible),
+   which silently neutralises every `position: sticky` descendant of body. */
+html {
   overflow-x: hidden;
 }
 
@@ -279,6 +283,48 @@ select:focus-visible,
 
 .table-container {
   overflow-x: auto;
+}
+
+/* Opt a table wrapper out of being a scroll container on wide viewports
+   (setting one overflow axis to "auto" forces the other from "visible" to
+   "auto" too, which scopes a sticky `thead th` to a scrollport that never
+   scrolls). The transactions table's columns already fit at desktop widths,
+   so this trades away nothing there while letting the page itself scroll,
+   which is required for the sticky header to have a moving scrollport.
+   Narrow viewports restore horizontal scrolling and simply don't get a
+   sticky header -- that trade is deliberate so mobile overflow behaviour
+   stays untouched. */
+.table-container--page-sticky {
+  overflow-x: visible;
+}
+
+@media (max-width: 900px) {
+  .table-container--page-sticky {
+    overflow-x: auto;
+  }
+}
+
+.transactions-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: var(--color-surface);
+  padding-block: var(--space-3);
+  /* .filters sits inside a .card with padding: var(--space-6) -- extend the
+     sticky bar to the card's edges so rows scrolling underneath don't peek
+     through the card's side padding. */
+  margin-inline: calc(-1 * var(--space-6));
+  padding-inline: var(--space-6);
+}
+
+/* Sticky on the cells, not the row -- support for `position: sticky` on
+   `thead` itself is inconsistent, while `th` is universally supported.
+   z-index sits below the toolbar's so the toolbar always wins the overlap. */
+.transactions-table thead th {
+  position: sticky;
+  top: var(--transactions-toolbar-height, 0px);
+  z-index: 10;
+  background: var(--color-surface);
 }
 
 table {

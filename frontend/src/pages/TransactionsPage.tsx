@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   autoCategorize,
@@ -81,6 +81,15 @@ export default function TransactionsPage() {
   const dateFrom = searchParams.get("date_from") ?? "";
   const dateTo = searchParams.get("date_to") ?? "";
   const fileRef = useRef<HTMLInputElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const [toolbarHeight, setToolbarHeight] = useState(0);
+
+  useLayoutEffect(() => {
+    const measure = () => setToolbarHeight(toolbarRef.current?.offsetHeight ?? 0);
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
 
   const loadData = useCallback(async () => {
     const [txRes, catRes] = await Promise.all([
@@ -435,7 +444,7 @@ export default function TransactionsPage() {
       )}
 
       <Card>
-        <div className="filters">
+        <div className="filters transactions-toolbar" ref={toolbarRef}>
           <select
             value={filters.bank}
             onChange={(e) =>
@@ -492,7 +501,10 @@ export default function TransactionsPage() {
           </button>
         </div>
 
-        <TableContainer>
+        <TableContainer
+          className="transactions-table table-container--page-sticky"
+          style={{ "--transactions-toolbar-height": `${toolbarHeight}px` } as React.CSSProperties}
+        >
           <table>
             <thead>
               <tr>
