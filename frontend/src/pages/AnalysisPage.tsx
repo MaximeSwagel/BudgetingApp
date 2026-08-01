@@ -185,8 +185,8 @@ export default function AnalysisPage() {
               onRangeSelect={setRange}
             />
             <p className="dash-muted">
-              Double-click a bar to view a single day, or drag the slider under the chart to pick a
-              range.
+              Click a bar to start a range, then click another bar to select the interval, or
+              double-click a single bar to open that day.
             </p>
             {range && (
               <Link

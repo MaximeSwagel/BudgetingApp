@@ -10,24 +10,41 @@ vi.mock("../api/client");
 
 // jsdom has no layout engine, so Recharts' ResponsiveContainer (which sizes
 // itself off a ResizeObserver) never renders its children in tests. Replace
-// the whole module with lightweight stand-ins: everything but Legend is
-// inert, and Legend renders a stable, non-SVG marker so the mode-toggle test
-// can assert on it instead of chart geometry.
+// the whole module with lightweight stand-ins: Bar renders one clickable
+// button per synthetic index (same shape DailySpendChart.test.tsx uses) so
+// tests can drive the click-then-click range selection, Cell is inert, and
+// Legend renders a stable, non-SVG marker so the mode-toggle test can assert
+// on it instead of chart geometry.
 vi.mock("recharts", () => {
   const Passthrough = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
   const Inert = () => null;
   return {
     ResponsiveContainer: Passthrough,
     BarChart: Passthrough,
-    Bar: Inert,
+    Bar: ({
+      dataKey,
+      onClick,
+    }: {
+      dataKey: string;
+      onClick?: (entry: undefined, index: number, event: object) => void;
+    }) => (
+      <div data-testid={`bar-${dataKey}`}>
+        {[0, 1, 2].map((i) => (
+          <button
+            key={i}
+            type="button"
+            data-testid={`bar-${dataKey}-${i}`}
+            onClick={() => onClick?.(undefined, i, {})}
+          />
+        ))}
+      </div>
+    ),
     XAxis: Inert,
     YAxis: Inert,
     CartesianGrid: Inert,
     Tooltip: Inert,
+    Cell: Inert,
     Legend: () => <div data-testid="chart-legend" />,
-    Brush: ({ onChange }: { onChange?: (range?: { startIndex?: number; endIndex?: number }) => void }) => (
-      <button type="button" data-testid="chart-brush" onClick={() => onChange?.({ startIndex: 0, endIndex: 1 })} />
-    ),
   };
 });
 
@@ -155,7 +172,7 @@ describe("AnalysisPage", () => {
     expect(screen.getByText("90d")).toHaveClass("btn-secondary");
   });
 
-  it("surfaces a Transactions link for a brush-selected range", async () => {
+  it("surfaces a Transactions link after a click-then-click range selection", async () => {
     const rangeData = {
       ...BASE_DATA,
       daily: [
@@ -168,8 +185,9 @@ describe("AnalysisPage", () => {
 
     renderPage();
 
-    await waitFor(() => expect(screen.getByTestId("chart-brush")).toBeInTheDocument());
-    await userEvent.click(screen.getByTestId("chart-brush"));
+    await waitFor(() => expect(screen.getByTestId("bar-total-0")).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId("bar-total-0"));
+    await userEvent.click(screen.getByTestId("bar-total-1"));
 
     await waitFor(() =>
       expect(screen.getByText(/View 2 days/)).toBeInTheDocument()
