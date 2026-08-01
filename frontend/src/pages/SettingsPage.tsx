@@ -112,111 +112,113 @@ export default function SettingsPage() {
     <div>
       <PageHeader title="Settings" actions={<span className="dash-period">AI Categorization</span>} />
 
-      <Card className="settings-grid">
-        <div className="settings-field">
-          <label className="settings-label" htmlFor="provider-select">
-            AI Provider
-          </label>
-          <select
-            id="provider-select"
-            value={provider}
-            onChange={(e) => setProvider(e.target.value)}
-          >
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Claude (Anthropic)</option>
-          </select>
-        </div>
-
-        <div className="settings-field">
-          <span className="settings-label">API key status</span>
-          <div className="key-status-row">
-            <KeyStatus configured={settings.openai_key_configured} providerLabel="OpenAI" />
-            <KeyStatus configured={settings.anthropic_key_configured} providerLabel="Claude (Anthropic)" />
+      <div className="settings-content">
+        <Card className="settings-grid">
+          <div className="settings-field">
+            <label className="settings-label" htmlFor="provider-select">
+              AI Provider
+            </label>
+            <select
+              id="provider-select"
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+            >
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Claude (Anthropic)</option>
+            </select>
           </div>
-        </div>
 
-        <div className="settings-field">
-          <label className="settings-label" htmlFor="model-select">
-            Model ({PROVIDER_LABELS[provider]})
-          </label>
-          <select
-            id="model-select"
-            value={currentModelId}
-            onChange={(e) =>
-              provider === "anthropic"
-                ? setAnthropicModel(e.target.value)
-                : setOpenaiModel(e.target.value)
-            }
-          >
-            {currentModels.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label} — ${m.input_per_1m.toFixed(2)}/$
-                {m.output_per_1m.toFixed(2)} per 1M tokens (in/out)
-              </option>
-            ))}
-          </select>
-          {currentModelInfo && (
-            <div className="settings-model-option">
-              Estimated cost: ${currentModelInfo.est_cost_per_1000_txns.toFixed(2)} per 1,000 categorized
-              transactions.
+          <div className="settings-field">
+            <span className="settings-label">API key status</span>
+            <div className="key-status-row">
+              <KeyStatus configured={settings.openai_key_configured} providerLabel="OpenAI" />
+              <KeyStatus configured={settings.anthropic_key_configured} providerLabel="Claude (Anthropic)" />
             </div>
-          )}
-        </div>
+          </div>
 
-        <div className="settings-field">
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? "Saving..." : "Save"}
-          </Button>
-          {saved && !saving && <span className="settings-saved">Saved.</span>}
-        </div>
-      </Card>
-
-      <Card>
-        <h3>Upload History</h3>
-        <TableContainer className="settings-upload-table">
-          <table>
-            <thead>
-              <tr>
-                <th>Uploaded</th>
-                <th>File</th>
-                <th>Bank/Format</th>
-                <th>Parsed</th>
-                <th>Imported</th>
-                <th>Skipped</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {logs.map((log) => (
-                <tr key={log.id}>
-                  <td>{new Date(log.uploaded_at).toLocaleString("en-GB")}</td>
-                  <td>{log.filename}</td>
-                  <td>{log.bank || log.format_detected || "-"}</td>
-                  <td>{log.rows_parsed}</td>
-                  <td>{log.rows_imported}</td>
-                  <td>{log.rows_skipped}</td>
-                  <td>
-                    {log.status === "success" ? (
-                      "Success"
-                    ) : (
-                      <span title={log.error ?? undefined}>
-                        Failed{log.error ? `: ${log.error}` : ""}
-                      </span>
-                    )}
-                  </td>
-                </tr>
+          <div className="settings-field">
+            <label className="settings-label" htmlFor="model-select">
+              Model ({PROVIDER_LABELS[provider]})
+            </label>
+            <select
+              id="model-select"
+              value={currentModelId}
+              onChange={(e) =>
+                provider === "anthropic"
+                  ? setAnthropicModel(e.target.value)
+                  : setOpenaiModel(e.target.value)
+              }
+            >
+              {currentModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.label} — ${m.input_per_1m.toFixed(2)}/$
+                  {m.output_per_1m.toFixed(2)} per 1M tokens (in/out)
+                </option>
               ))}
-              {logs.length === 0 && (
+            </select>
+            {currentModelInfo && (
+              <div className="settings-model-option">
+                Estimated cost: ${currentModelInfo.est_cost_per_1000_txns.toFixed(2)} per 1,000 categorized
+                transactions.
+              </div>
+            )}
+          </div>
+
+          <div className="settings-field">
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? "Saving..." : "Save"}
+            </Button>
+            {saved && !saving && <span className="settings-saved">Saved.</span>}
+          </div>
+        </Card>
+
+        <Card>
+          <h3>Upload History</h3>
+          <TableContainer className="settings-upload-table">
+            <table>
+              <thead>
                 <tr>
-                  <td colSpan={7} className="empty-state">
-                    No uploads yet.
-                  </td>
+                  <th>Uploaded</th>
+                  <th>File</th>
+                  <th>Bank/Format</th>
+                  <th>Parsed</th>
+                  <th>Imported</th>
+                  <th>Skipped</th>
+                  <th>Status</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </TableContainer>
-      </Card>
+              </thead>
+              <tbody>
+                {logs.map((log) => (
+                  <tr key={log.id}>
+                    <td>{new Date(log.uploaded_at).toLocaleString("en-GB")}</td>
+                    <td>{log.filename}</td>
+                    <td>{log.bank || log.format_detected || "-"}</td>
+                    <td>{log.rows_parsed}</td>
+                    <td>{log.rows_imported}</td>
+                    <td>{log.rows_skipped}</td>
+                    <td>
+                      {log.status === "success" ? (
+                        "Success"
+                      ) : (
+                        <span title={log.error ?? undefined}>
+                          Failed{log.error ? `: ${log.error}` : ""}
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+                {logs.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="empty-state">
+                      No uploads yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </TableContainer>
+        </Card>
+      </div>
     </div>
   );
 }
