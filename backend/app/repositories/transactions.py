@@ -155,6 +155,124 @@ class TransactionRepository(BaseRepository[Transaction]):
         )
         return result.all()
 
+    async def daily_category_spend(self, since: datetime):
+        """(day, category_name, total) expense rows on/after `since`, in base-
+        currency converted amounts. `category_name` is None for uncategorized
+        rows (outer join keeps them instead of dropping them)."""
+        result = await self.db.execute(
+            select(
+                func.date(Transaction.date).label("day"),
+                Category.name.label("category_name"),
+                func.sum(Transaction.converted_amount).label("total"),
+            )
+            .join(Transaction.category, isouter=True)
+            .where(
+                Transaction.is_expense == True,  # noqa: E712
+                Transaction.is_duplicate == False,  # noqa: E712
+                Transaction.date >= since,
+            )
+            .group_by("day", "category_name")
+            .order_by("day")
+        )
+        return result.all()
+
+    async def category_distribution(self):
+        """(group_name, category_name, total, count) expense rows, largest
+        total first is left to the caller -- this returns unsorted groups."""
+        result = await self.db.execute(
+            select(
+                CategoryGroup.name.label("group_name"),
+                Category.name.label("category_name"),
+                func.sum(Transaction.converted_amount).label("total"),
+                func.count().label("count"),
+            )
+            .join(Transaction.category)
+            .join(Category.group)
+            .where(
+                Transaction.is_expense == True,  # noqa: E712
+                Transaction.is_duplicate == False,  # noqa: E712
+            )
+            .group_by("group_name", "category_name")
+        )
+        return result.all()
+
+    async def currency_breakdown(self):
+        """(original_currency, original_total, converted_total, count) rows,
+        pre-conversion sign preserved (not abs'd), across all non-duplicate
+        transactions."""
+        result = await self.db.execute(
+            select(
+                Transaction.original_currency,
+                func.sum(Transaction.original_amount).label("original_total"),
+                func.sum(Transaction.converted_amount).label("converted_total"),
+                func.count().label("count"),
+            )
+            .where(Transaction.is_duplicate == False)  # noqa: E712
+            .group_by(Transaction.original_currency)
+        )
+        return result.all()
+
+    async def bank_breakdown(self) -> list[dict]:
+        """(bank, count, total) rows across all non-duplicate transactions,
+        total is the sum of absolute converted amounts (volume moved through
+        that source, income and expense alike). Aggregated in Python rather
+        than `func.sum(func.abs(...))`: SQLite loses the Numeric column's
+        Decimal typing through `func.abs()`, returning e.g. "30" instead of
+        "30.00" and breaking the app's string-money convention."""
+        result = await self.db.execute(
+            select(Transaction.bank, Transaction.converted_amount).where(
+                Transaction.is_duplicate == False  # noqa: E712
+            )
+        )
+        rows = result.all()
+
+        totals: dict[str, dict] = {}
+        for row in rows:
+            bucket = totals.setdefault(row.bank, {"count": 0, "total": Decimal("0")})
+            bucket["count"] += 1
+            bucket["total"] += abs(row.converted_amount or Decimal("0"))
+
+        return [
+            {"bank": bank, "count": bucket["count"], "total": bucket["total"]}
+            for bank, bucket in totals.items()
+        ]
+
+    async def duplicate_groups(self) -> list[dict]:
+        """Groups of non-duplicate transactions sharing (day, original_amount,
+        description) with count > 1 -- a looser integrity check than the
+        strict 5-tuple import-time dedup (see analysis router docstring).
+        Aggregated in Python (not SQL GROUP BY + HAVING) to stay portable
+        across SQLite (tests) and Postgres without dialect-specific date
+        comparisons."""
+        result = await self.db.execute(
+            select(
+                Transaction.date,
+                Transaction.original_amount,
+                Transaction.description,
+                Transaction.bank,
+            ).where(Transaction.is_duplicate == False)  # noqa: E712
+        )
+        rows = result.all()
+
+        buckets: dict[tuple, dict] = {}
+        for row in rows:
+            key = (row.date.date(), row.original_amount, row.description)
+            bucket = buckets.setdefault(key, {"banks": set(), "count": 0})
+            bucket["banks"].add(row.bank)
+            bucket["count"] += 1
+
+        return [
+            {
+                "day": day,
+                "amount": amount,
+                "description": description,
+                "count": bucket["count"],
+                "banks": sorted(bucket["banks"]),
+            }
+            for (day, amount, description), bucket in buckets.items()
+            if bucket["count"] > 1
+        ]
+
     async def monthly_category_totals(self, year: int):
         from sqlalchemy import extract
 
