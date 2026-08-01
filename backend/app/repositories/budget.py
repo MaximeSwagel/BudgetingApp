@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.models import BudgetTarget
 from app.repositories.base import BaseRepository
@@ -20,3 +20,9 @@ class BudgetTargetRepository(BaseRepository[BudgetTarget]):
             )
         )
         return result.scalar_one_or_none()
+
+    async def delete_by_category(self, category_id: int) -> None:
+        """Called when a Category is deleted (D-02): its budget targets are
+        planning metadata meaningless without the category, safe to remove
+        outright -- unlike transactions, which block the delete instead."""
+        await self.db.execute(delete(BudgetTarget).where(BudgetTarget.category_id == category_id))

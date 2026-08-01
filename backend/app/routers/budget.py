@@ -38,6 +38,7 @@ async def budget_summary(
     for group in all_groups:
         group_data = {
             "group": group.name,
+            "group_id": group.id,
             "categories": [],
             "monthly_totals": {},
             "annual_total": Decimal("0"),
