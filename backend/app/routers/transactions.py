@@ -3,8 +3,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
-from app.repositories import CategoryGroupRepository, CategoryRepository, TransactionRepository
+from app.repositories import (
+    CategoryCorrectionRepository,
+    CategoryGroupRepository,
+    CategoryRepository,
+    TransactionRepository,
+)
 from app.services.categorizer import categorize_transactions, resolve_category_id
+from app.services.corrections import categorize_with_corrections, learned_categories, match_key
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
@@ -37,7 +43,8 @@ async def auto_categorize(db: AsyncSession = Depends(get_db)):
         }
         for t in txns
     ]
-    results = await categorize_transactions(payload)
+    learned = learned_categories(await CategoryCorrectionRepository(db).key_map())
+    results = await categorize_with_corrections(payload, learned, categorize_transactions)
 
     group_repo = CategoryGroupRepository(db)
     category_repo = CategoryRepository(db)
@@ -84,11 +91,20 @@ async def list_transactions(
         page_size=page_size,
     )
 
-    return {
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "transactions": [
+    key_map = await CategoryCorrectionRepository(db).key_map()
+
+    def _correction_fields(description: str) -> tuple[str | None, int | None]:
+        key = match_key(description, key_map)
+        if key is None:
+            return None, None
+        correction = key_map[key]
+        status = "corrected" if correction.category_id is not None else "flagged"
+        return status, correction.id
+
+    result_transactions = []
+    for t in transactions:
+        correction_status, correction_id = _correction_fields(t.description)
+        result_transactions.append(
             {
                 "id": t.id,
                 "date": t.date.isoformat(),
@@ -103,9 +119,16 @@ async def list_transactions(
                 "category": t.category.name if t.category else None,
                 "category_id": t.category_id,
                 "is_expense": t.is_expense,
+                "correction_status": correction_status,
+                "correction_id": correction_id,
             }
-            for t in transactions
-        ],
+        )
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "transactions": result_transactions,
     }
 
 

@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models import ImportBatch, Transaction, UploadLog
 from app.parsers import detect_bank_format, parse_credit_agricole, parse_leumi, parse_revolut_en, parse_revolut_fr
 from app.repositories import (
+    CategoryCorrectionRepository,
     CategoryGroupRepository,
     CategoryRepository,
     ImportBatchRepository,
@@ -16,6 +17,7 @@ from app.repositories import (
     UploadLogRepository,
 )
 from app.services.categorizer import categorize_transactions, resolve_category_id
+from app.services.corrections import categorize_with_corrections, learned_categories
 from app.services.currency import convert_amount
 
 router = APIRouter(prefix="/api/upload", tags=["upload"])
@@ -137,7 +139,8 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
     )
     await batch_repo.flush()
 
-    categories = await categorize_transactions(parsed_transactions)
+    learned = learned_categories(await CategoryCorrectionRepository(db).key_map())
+    categories = await categorize_with_corrections(parsed_transactions, learned, categorize_transactions)
 
     base_currency = settings.base_currency
     imported_count = 0

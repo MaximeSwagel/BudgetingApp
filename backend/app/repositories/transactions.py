@@ -91,6 +91,23 @@ class TransactionRepository(BaseRepository[Transaction]):
         )
         return result.scalar_one_or_none()
 
+    async def list_matching_candidates(self, first_token: str, limit: int = 1000) -> list[Transaction]:
+        """Cheap SQL pre-filter for retroactive merchant corrections: a
+        case-insensitive `ilike` wildcard on `first_token`, bounded by
+        `limit`. The merchant key is normalized (punctuation and digits
+        stripped) so it may not appear verbatim in the raw description --
+        the caller MUST re-verify each candidate in Python with `match_key`.
+        This is not the authoritative match, just a bounded scan surface."""
+        result = await self.db.execute(
+            select(Transaction)
+            .where(
+                Transaction.description.ilike(f"%{first_token}%"),
+                Transaction.is_duplicate == False,  # noqa: E712
+            )
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def list_uncategorized(self, limit: int = 300) -> list[Transaction]:
         result = await self.db.execute(
             select(Transaction)
