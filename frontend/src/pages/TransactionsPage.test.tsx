@@ -301,6 +301,53 @@ describe("TransactionsPage", () => {
     expect(tableWrapper).toBeInTheDocument();
   });
 
+  it("exports every page of the filtered result set and triggers one download", async () => {
+    function makeRows(count: number, offset: number) {
+      return Array.from({ length: count }, (_, i) => ({
+        id: offset + i,
+        date: "2026-01-05T10:00:00",
+        description: `Row ${offset + i}`,
+        original_amount: "-1.00",
+        original_currency: "ILS",
+        converted_amount: "-1.00",
+        base_currency: "ILS",
+        bank: "Revolut",
+        category_group: null,
+        category: null,
+      }));
+    }
+
+    vi.mocked(api.getTransactions).mockImplementation(async (params: Record<string, string>) => {
+      if (params.page_size === "200") {
+        if (params.page === "1") return { transactions: makeRows(200, 0), total: 250 };
+        if (params.page === "2") return { transactions: makeRows(50, 200), total: 250 };
+        return { transactions: [], total: 250 };
+      }
+      return { transactions: [], total: 0 };
+    });
+
+    Object.defineProperty(URL, "createObjectURL", {
+      value: vi.fn(() => "blob:mock"),
+      writable: true,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", { value: vi.fn(), writable: true });
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Export to Excel")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Export to Excel"));
+
+    await waitFor(() =>
+      expect(api.getTransactions).toHaveBeenCalledWith(
+        expect.objectContaining({ page: "2", page_size: "200" })
+      )
+    );
+    await waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(1));
+
+    clickSpy.mockRestore();
+  });
+
   it("preserves the URL's date params when toggling uncategorized only", async () => {
     vi.mocked(api.getTransactions).mockResolvedValue({ transactions: [], total: 0 });
 

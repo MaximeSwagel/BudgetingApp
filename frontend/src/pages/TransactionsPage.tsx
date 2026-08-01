@@ -13,6 +13,7 @@ import {
   uploadCSV,
 } from "../api/client";
 import { formatAmount } from "../lib/format";
+import { csvFilename, toCsv, TRANSACTION_CSV_HEADERS, transactionToCsvRow } from "../lib/csv";
 import {
   Badge,
   Card,
@@ -22,6 +23,12 @@ import {
   StatusMessage,
   TableContainer,
 } from "../components/ui";
+
+// Backend's documented page_size cap (backend/app/routers/transactions.py:79).
+const EXPORT_PAGE_SIZE = 200;
+// A misreported `total` must not spin the export loop forever -- this bounds
+// it at 10,000 rows regardless.
+const MAX_EXPORT_PAGES = 50;
 
 interface Transaction {
   id: number;
@@ -73,6 +80,7 @@ export default function TransactionsPage() {
   const [flagRowId, setFlagRowId] = useState<number | null>(null);
   const [flagCategoryId, setFlagCategoryId] = useState("");
   const [savingCorrection, setSavingCorrection] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [filters, setFilters] = useState({
     bank: "",
     currency: "",
@@ -310,6 +318,50 @@ export default function TransactionsPage() {
     await loadData();
   };
 
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      const exportFilters = {
+        ...filters,
+        date_from: dateFrom,
+        date_to: dateTo,
+        uncategorized: uncategorizedOnly ? "true" : "",
+      };
+      const rows: Transaction[] = [];
+      let exportPage = 1;
+      let reportedTotal = Infinity;
+
+      while (rows.length < reportedTotal && exportPage <= MAX_EXPORT_PAGES) {
+        const res = await getTransactions({
+          ...exportFilters,
+          page: String(exportPage),
+          page_size: String(EXPORT_PAGE_SIZE),
+        });
+        const batch: Transaction[] = res.transactions || [];
+        reportedTotal = typeof res.total === "number" ? res.total : rows.length + batch.length;
+        if (batch.length === 0) break;
+        rows.push(...batch);
+        exportPage += 1;
+      }
+
+      const csvBody = toCsv([TRANSACTION_CSV_HEADERS, ...rows.map(transactionToCsvRow)]);
+      // UTF-8 BOM -- without it Excel mangles the non-ASCII (e.g. Hebrew)
+      // merchant descriptions this app routinely imports.
+      const BOM = "﻿";
+      const blob = new Blob([BOM + csvBody], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = csvFilename();
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const totalPages = Math.ceil(total / 50);
 
   const uniqueBanks = [...new Set(transactions.map((t) => t.bank))];
@@ -359,6 +411,14 @@ export default function TransactionsPage() {
               disabled={categorizing}
             >
               {categorizing ? "Categorizing..." : "Auto-categorize (AI)"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleExport}
+              disabled={exporting}
+            >
+              {exporting ? "Exporting..." : "Export to Excel"}
             </button>
           </>
         }
