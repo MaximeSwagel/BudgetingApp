@@ -108,3 +108,31 @@ export async function getAnalysis(days?: number) {
   const res = await fetch(`${BASE}/analysis${qs}`);
   return res.json();
 }
+
+export async function createCategoryGroup(name: string) {
+  const res = await fetch(`${BASE}/categories/groups`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  return res.json();
+}
+
+export async function createCategory(groupId: number, name: string) {
+  const res = await fetch(`${BASE}/categories`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, group_id: groupId }),
+  });
+  return res.json();
+}
+
+export async function deleteCategory(categoryId: number) {
+  const res = await fetch(`${BASE}/categories/${categoryId}`, { method: "DELETE" });
+  return res.json();
+}
+
+export async function deleteCategoryGroup(groupId: number) {
+  const res = await fetch(`${BASE}/categories/groups/${groupId}`, { method: "DELETE" });
+  return res.json();
+}
