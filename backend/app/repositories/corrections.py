@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import joinedload
 
 from app.models import Category, CategoryCorrection
@@ -36,3 +36,19 @@ class CategoryCorrectionRepository(BaseRepository[CategoryCorrection]):
         """BaseRepository has no delete -- kept local to this repository
         rather than widening the shared base for a single caller."""
         await self.db.delete(correction)
+
+    async def clear_category(self, category_id: int) -> None:
+        """Called when a Category is deleted (D-02): NULL out both FKs on
+        this table that may point at it so Postgres never sees a dangling
+        reference, without deleting the correction rows themselves (the
+        merchant-learning history stays, just loses its category link)."""
+        await self.db.execute(
+            update(CategoryCorrection)
+            .where(CategoryCorrection.category_id == category_id)
+            .values(category_id=None)
+        )
+        await self.db.execute(
+            update(CategoryCorrection)
+            .where(CategoryCorrection.original_category_id == category_id)
+            .values(original_category_id=None)
+        )

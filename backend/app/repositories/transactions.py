@@ -290,6 +290,12 @@ class TransactionRepository(BaseRepository[Transaction]):
             if bucket["count"] > 1
         ]
 
+    async def count_by_category(self, category_id: int) -> int:
+        result = await self.db.execute(
+            select(func.count()).select_from(Transaction).where(Transaction.category_id == category_id)
+        )
+        return result.scalar() or 0
+
     async def monthly_category_totals(self, year: int):
         from sqlalchemy import extract
 
