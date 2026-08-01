@@ -7,6 +7,7 @@ import {
   getBudgetSummary,
 } from "../api/client";
 import { formatMonthValue, formatPercent } from "../lib/format";
+import { budgetCsvFilename, budgetCsvHeaders, budgetToCsvRows, toCsv } from "../lib/csv";
 import { Button, Card, PageHeader, StatusMessage, TableContainer } from "../components/ui";
 
 interface CategoryData {
@@ -122,6 +123,26 @@ export default function BudgetPage() {
     await loadBudget();
   };
 
+  // Synchronous (D-09): the year's data is already in component state, so
+  // there is no fetch and no `exporting` state to track. Mirrors
+  // TransactionsPage.handleExport's Blob + UTF-8 BOM + anchor pattern
+  // rather than inventing a new download path.
+  const handleExport = () => {
+    if (!data) return;
+    const csvBody = toCsv([budgetCsvHeaders(year), ...budgetToCsvRows(data)]);
+    // UTF-8 BOM -- without it Excel mangles non-ASCII category names.
+    const BOM = "﻿";
+    const blob = new Blob([BOM + csvBody], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = budgetCsvFilename(year);
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  };
+
   if (!data) return <Card>Loading...</Card>;
 
   return (
@@ -142,6 +163,9 @@ export default function BudgetPage() {
                 <option value={2027}>2027</option>
               </select>
             </div>
+            <Button variant="secondary" onClick={handleExport}>
+              Export to Excel
+            </Button>
             <Button variant="secondary" onClick={() => setEditMode((v) => !v)}>
               {editMode ? "Done" : "Edit"}
             </Button>
@@ -166,7 +190,7 @@ export default function BudgetPage() {
       {statusMsg && <StatusMessage variant={statusMsg.variant}>{statusMsg.text}</StatusMessage>}
 
       <Card>
-        <TableContainer className="budget-table">
+        <TableContainer className="budget-table table-container--sticky-head">
           <table>
             <thead>
               <tr>

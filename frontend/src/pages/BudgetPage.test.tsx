@@ -144,4 +144,42 @@ describe("BudgetPage", () => {
       screen.queryByRole("button", { name: "Remove Household Expenses" })
     ).not.toBeInTheDocument();
   });
+
+  it("renders the table inside the bounded sticky-header scroll container", async () => {
+    vi.mocked(api.getBudgetSummary).mockResolvedValue(SAMPLE_SUMMARY);
+
+    const { container } = render(<BudgetPage />);
+    await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
+
+    expect(
+      container.querySelector(".budget-table.table-container--sticky-head")
+    ).toBeInTheDocument();
+  });
+
+  it("exports the budget as a CSV download named after the current year", async () => {
+    vi.mocked(api.getBudgetSummary).mockResolvedValue(SAMPLE_SUMMARY);
+
+    const createObjectURL = vi.fn().mockReturnValue("blob:fake-url");
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", { value: createObjectURL, writable: true });
+    Object.defineProperty(URL, "revokeObjectURL", { value: revokeObjectURL, writable: true });
+
+    let capturedDownload = "";
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        capturedDownload = this.download;
+      });
+
+    render(<BudgetPage />);
+    await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Export to Excel" }));
+
+    expect(clickSpy).toHaveBeenCalledTimes(1);
+    const expectedYear = new Date().getFullYear();
+    expect(capturedDownload).toMatch(new RegExp(`^budget-${expectedYear}-\\d{4}-\\d{2}-\\d{2}\\.csv$`));
+
+    clickSpy.mockRestore();
+  });
 });
