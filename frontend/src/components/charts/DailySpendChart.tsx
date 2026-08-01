@@ -1,9 +1,9 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Bar,
   BarChart,
-  Brush,
   CartesianGrid,
+  Cell,
   Legend,
   ResponsiveContainer,
   Tooltip,
@@ -27,13 +27,21 @@ export interface DailySpendChartProps {
   mode: DailySpendMode;
   /** Fired once when the same bar index is clicked twice within the double-click window. */
   onDayDrillDown?: (date: string) => void;
-  /** Fired on every Brush change; null when the selection is the Brush's resting/full-span state. */
+  /**
+   * Fired whenever the click-then-click range selection changes: null on
+   * arm/cancel/restart, and `{from, to, count}` (chronologically normalized,
+   * inclusive day span) once a second bar completes the range.
+   */
   onRangeSelect?: (range: { from: string; to: string; count: number } | null) => void;
 }
 
 // Two clicks on the same bar index within this window count as a
 // double-click drill-down; anything slower (or a different index) resets.
 const DOUBLE_CLICK_MS = 400;
+
+// Out-of-range bars are dimmed (not recolored) so the categorical palette
+// stays intact in both aggregate and stacked byCategory modes.
+const DIM_OPACITY = 0.28;
 
 // Categorical palette per the dataviz skill's validated default order --
 // fixed slot order, never cycled or reshuffled. Clears the adjacent-pair
@@ -89,101 +97,162 @@ export default function DailySpendChart({
   });
 
   const lastClickRef = useRef<{ index: number; at: number } | null>(null);
+  const [selection, setSelection] = useState<{ start: number; end: number | null } | null>(null);
+
+  // Stale-window guard: reset the internal selection whenever the time-range
+  // preset swaps the dataset, so armed indices can never point at dates from
+  // a previous window. Deliberately does NOT call onRangeSelect -- the page
+  // already nulls its own range on the same trigger, and doing it here too
+  // would risk a render loop.
+  useEffect(() => {
+    setSelection(null);
+  }, [data]);
 
   const handleBarClick = (_entry: unknown, index: number) => {
+    const now = Date.now();
     const last = lastClickRef.current;
-    if (last && last.index === index && Date.now() - last.at <= DOUBLE_CLICK_MS) {
+    if (last && last.index === index && now - last.at <= DOUBLE_CLICK_MS) {
+      // Fast same-index click: drilldown wins over range selection. Wipe any
+      // in-progress or completed range first so no stale CTA survives.
       lastClickRef.current = null;
+      setSelection(null);
+      onRangeSelect?.(null);
       const date = rows[index]?.date;
       if (typeof date === "string") onDayDrillDown?.(date);
       return;
     }
-    lastClickRef.current = { index, at: Date.now() };
+    lastClickRef.current = { index, at: now };
+
+    if (selection === null) {
+      // (a) no selection -> arm.
+      setSelection({ start: index, end: null });
+      onRangeSelect?.(null);
+      return;
+    }
+
+    if (selection.end === null) {
+      if (selection.start === index) {
+        // (b) armed and SAME index clicked slowly -> explicit cancel.
+        setSelection(null);
+        onRangeSelect?.(null);
+        return;
+      }
+      // (c) armed and DIFFERENT index -> complete, chronologically normalized.
+      const lo = Math.min(selection.start, index);
+      const hi = Math.max(selection.start, index);
+      const from = rows[lo]?.date;
+      const to = rows[hi]?.date;
+      if (typeof from !== "string" || typeof to !== "string") {
+        setSelection(null);
+        onRangeSelect?.(null);
+        return;
+      }
+      setSelection({ start: lo, end: hi });
+      onRangeSelect?.({ from, to, count: hi - lo + 1 });
+      return;
+    }
+
+    // (d) already complete -> re-arm at the newly clicked bar.
+    setSelection({ start: index, end: null });
+    onRangeSelect?.(null);
   };
 
-  const handleBrushChange = (range?: { startIndex?: number; endIndex?: number }) => {
-    const startIndex = range?.startIndex;
-    const endIndex = range?.endIndex;
-    if (startIndex == null || endIndex == null) {
-      onRangeSelect?.(null);
-      return;
-    }
-    const from = rows[startIndex]?.date;
-    const to = rows[endIndex]?.date;
-    if (typeof from !== "string" || typeof to !== "string") {
-      onRangeSelect?.(null);
-      return;
-    }
-    if (startIndex === 0 && endIndex === rows.length - 1) {
-      onRangeSelect?.(null);
-      return;
-    }
-    onRangeSelect?.({ from, to, count: endIndex - startIndex + 1 });
-  };
+  const selLo = selection === null ? null : Math.min(selection.start, selection.end ?? selection.start);
+  const selHi = selection === null ? null : Math.max(selection.start, selection.end ?? selection.start);
+  const dimmed = (i: number) => selection !== null && (i < (selLo as number) || i > (selHi as number));
+
+  const renderCells = () =>
+    rows.map((row, i) => (
+      <Cell
+        key={row.date as string}
+        fill={SERIES_COLORS[0]}
+        fillOpacity={dimmed(i) ? DIM_OPACITY : 1}
+      />
+    ));
 
   return (
-    <ResponsiveContainer width="100%" height={280}>
-      <BarChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-        <CartesianGrid vertical={false} stroke={GRID_COLOR} />
-        <XAxis
-          dataKey="date"
-          tickFormatter={formatDateTick}
-          tick={{ fill: AXIS_COLOR, fontSize: 12 }}
-          axisLine={{ stroke: GRID_COLOR }}
-          tickLine={false}
-          minTickGap={24}
-        />
-        <YAxis
-          tick={{ fill: AXIS_COLOR, fontSize: 12 }}
-          axisLine={false}
-          tickLine={false}
-          tickFormatter={formatValue}
-          width={48}
-        />
-        <Tooltip
-          formatter={(value, name) => [`${formatValue(Number(value))} ${currency}`, name]}
-          labelFormatter={(label) => formatDateTick(String(label))}
-          contentStyle={{ borderRadius: 8, border: `1px solid ${GRID_COLOR}`, fontSize: 13 }}
-        />
-        {mode === "aggregate" ? (
-          <Bar
-            dataKey="total"
-            name="Spend"
-            fill={SERIES_COLORS[0]}
-            radius={[4, 4, 0, 0]}
-            maxBarSize={24}
-            cursor="pointer"
-            onClick={handleBarClick}
+    <>
+      <ResponsiveContainer width="100%" height={280}>
+        <BarChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid vertical={false} stroke={GRID_COLOR} />
+          <XAxis
+            dataKey="date"
+            tickFormatter={formatDateTick}
+            tick={{ fill: AXIS_COLOR, fontSize: 12 }}
+            axisLine={{ stroke: GRID_COLOR }}
+            tickLine={false}
+            minTickGap={24}
           />
-        ) : (
-          <>
-            <Legend wrapperStyle={{ fontSize: 12 }} />
-            {categories.map((cat, i) => (
-              <Bar
-                key={cat}
-                dataKey={cat}
-                name={cat}
-                stackId="spend"
-                fill={SERIES_COLORS[i % SERIES_COLORS.length]}
-                stroke={SURFACE_COLOR}
-                strokeWidth={2}
-                maxBarSize={24}
-                cursor="pointer"
-                onClick={handleBarClick}
-              />
-            ))}
-          </>
-        )}
-        <Brush
-          dataKey="date"
-          height={26}
-          travellerWidth={8}
-          stroke={AXIS_COLOR}
-          fill={SURFACE_COLOR}
-          tickFormatter={formatDateTick}
-          onChange={handleBrushChange}
-        />
-      </BarChart>
-    </ResponsiveContainer>
+          <YAxis
+            tick={{ fill: AXIS_COLOR, fontSize: 12 }}
+            axisLine={false}
+            tickLine={false}
+            tickFormatter={formatValue}
+            width={48}
+          />
+          <Tooltip
+            formatter={(value, name) => [`${formatValue(Number(value))} ${currency}`, name]}
+            labelFormatter={(label) => formatDateTick(String(label))}
+            contentStyle={{ borderRadius: 8, border: `1px solid ${GRID_COLOR}`, fontSize: 13 }}
+          />
+          {mode === "aggregate" ? (
+            <Bar
+              dataKey="total"
+              name="Spend"
+              fill={SERIES_COLORS[0]}
+              radius={[4, 4, 0, 0]}
+              maxBarSize={24}
+              cursor="pointer"
+              onClick={handleBarClick}
+            >
+              {renderCells()}
+            </Bar>
+          ) : (
+            <>
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              {categories.map((cat, i) => (
+                <Bar
+                  key={cat}
+                  dataKey={cat}
+                  name={cat}
+                  stackId="spend"
+                  fill={SERIES_COLORS[i % SERIES_COLORS.length]}
+                  stroke={SURFACE_COLOR}
+                  strokeWidth={2}
+                  maxBarSize={24}
+                  cursor="pointer"
+                  onClick={handleBarClick}
+                >
+                  {rows.map((row, ri) => (
+                    <Cell
+                      key={row.date as string}
+                      fill={SERIES_COLORS[i % SERIES_COLORS.length]}
+                      fillOpacity={dimmed(ri) ? DIM_OPACITY : 1}
+                    />
+                  ))}
+                </Bar>
+              ))}
+            </>
+          )}
+        </BarChart>
+      </ResponsiveContainer>
+      {selection !== null && (
+        <p className="dash-muted daily-spend-selection">
+          {selection.end === null ? (
+            <>
+              Range start {formatDateTick(rows[selection.start]?.date as string)} — click another
+              bar to finish the range, or click it again to clear.
+            </>
+          ) : (
+            <>
+              Selected {(selHi as number) - (selLo as number) + 1} days (
+              {formatDateTick(rows[selLo as number]?.date as string)}–
+              {formatDateTick(rows[selHi as number]?.date as string)}) — click any bar to start a
+              new range.
+            </>
+          )}
+        </p>
+      )}
+    </>
   );
 }

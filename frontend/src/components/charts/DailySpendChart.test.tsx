@@ -7,8 +7,9 @@ import type { DailyPoint } from "./DailySpendChart";
 // jsdom has no layout engine, so Recharts' real primitives never render
 // anything interactive. Replace the whole module with interaction-capable
 // stand-ins: Bar exposes one button per synthetic index so tests can drive
-// clicks at specific indices, and Brush exposes one button per payload shape
-// the behavior spec calls out (partial span / full span / missing indices).
+// clicks at specific indices. Cell is inert -- the mock Bar ignores
+// children, so Cells never render; the entry only keeps element creation
+// valid for the newly imported member.
 vi.mock("recharts", () => {
   const Passthrough = ({ children }: { children?: ReactNode }) => <div>{children}</div>;
   const Inert = () => null;
@@ -20,6 +21,7 @@ vi.mock("recharts", () => {
     CartesianGrid: Inert,
     Tooltip: Inert,
     Legend: Inert,
+    Cell: Inert,
     Bar: ({ dataKey, onClick }: { dataKey: string; onClick?: (entry: undefined, index: number, event: object) => void }) => (
       <div data-testid={`bar-${dataKey}`}>
         {[0, 1, 2].map((i) => (
@@ -31,25 +33,6 @@ vi.mock("recharts", () => {
           />
         ))}
       </div>
-    ),
-    Brush: ({
-      onChange,
-    }: {
-      onChange?: (range?: { startIndex?: number; endIndex?: number }) => void;
-    }) => (
-      <>
-        <button
-          type="button"
-          data-testid="brush-partial"
-          onClick={() => onChange?.({ startIndex: 0, endIndex: 1 })}
-        />
-        <button
-          type="button"
-          data-testid="brush-full"
-          onClick={() => onChange?.({ startIndex: 0, endIndex: 2 })}
-        />
-        <button type="button" data-testid="brush-missing" onClick={() => onChange?.({})} />
-      </>
     ),
   };
 });
@@ -108,34 +91,88 @@ describe("DailySpendChart", () => {
     expect(onDayDrillDown).not.toHaveBeenCalled();
   });
 
-  it("fires onRangeSelect with the partial span when the brush selects two of three rows", () => {
+  it("arms a range on a single click, emitting null and showing the armed hint", () => {
     const onRangeSelect = vi.fn();
     renderChart(undefined, onRangeSelect);
 
-    fireEvent.click(screen.getByTestId("brush-partial"));
+    fireEvent.click(screen.getByTestId("bar-total-0"));
 
-    expect(onRangeSelect).toHaveBeenCalledWith({
+    expect(onRangeSelect).toHaveBeenCalledWith(null);
+    expect(screen.getByText(/Range start/)).toBeInTheDocument();
+  });
+
+  it("completes a chronologically normalized range on a forward click pair", () => {
+    const onRangeSelect = vi.fn();
+    renderChart(undefined, onRangeSelect);
+
+    fireEvent.click(screen.getByTestId("bar-total-0"));
+    fireEvent.click(screen.getByTestId("bar-total-2"));
+
+    expect(onRangeSelect).toHaveBeenLastCalledWith({
       from: "2026-07-29",
-      to: "2026-07-30",
-      count: 2,
+      to: "2026-07-31",
+      count: 3,
     });
   });
 
-  it("fires onRangeSelect(null) when the brush spans the entire dataset", () => {
+  it("normalizes a backward click pair to the same chronological range", () => {
     const onRangeSelect = vi.fn();
     renderChart(undefined, onRangeSelect);
 
-    fireEvent.click(screen.getByTestId("brush-full"));
+    fireEvent.click(screen.getByTestId("bar-total-2"));
+    fireEvent.click(screen.getByTestId("bar-total-0"));
 
-    expect(onRangeSelect).toHaveBeenCalledWith(null);
+    expect(onRangeSelect).toHaveBeenLastCalledWith({
+      from: "2026-07-29",
+      to: "2026-07-31",
+      count: 3,
+    });
   });
 
-  it("fires onRangeSelect(null) when the brush payload is missing indices", () => {
+  it("cancels the armed selection on a slow same-index click", () => {
+    const onRangeSelect = vi.fn();
+    const onDayDrillDown = vi.fn();
+    let clock = 1_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
+
+    renderChart(onDayDrillDown, onRangeSelect);
+
+    fireEvent.click(screen.getByTestId("bar-total-0"));
+    clock += 1000; // well past DOUBLE_CLICK_MS
+    fireEvent.click(screen.getByTestId("bar-total-0"));
+
+    expect(onRangeSelect).toHaveBeenLastCalledWith(null);
+    expect(onDayDrillDown).not.toHaveBeenCalled();
+
+    nowSpy.mockRestore();
+  });
+
+  it("restarts (re-arms) after a completed range when a new bar is clicked", () => {
     const onRangeSelect = vi.fn();
     renderChart(undefined, onRangeSelect);
 
-    fireEvent.click(screen.getByTestId("brush-missing"));
+    fireEvent.click(screen.getByTestId("bar-total-0"));
+    fireEvent.click(screen.getByTestId("bar-total-2"));
+    fireEvent.click(screen.getByTestId("bar-total-1"));
 
-    expect(onRangeSelect).toHaveBeenCalledWith(null);
+    expect(onRangeSelect).toHaveBeenLastCalledWith(null);
+    expect(screen.getByText(/Range start/)).toBeInTheDocument();
+  });
+
+  it("lets a fast double-click drilldown win over a completed range, clearing it", () => {
+    const onRangeSelect = vi.fn();
+    const onDayDrillDown = vi.fn();
+    renderChart(onDayDrillDown, onRangeSelect);
+
+    fireEvent.click(screen.getByTestId("bar-total-0"));
+    fireEvent.click(screen.getByTestId("bar-total-2"));
+
+    const bar1 = screen.getByTestId("bar-total-1");
+    fireEvent.click(bar1);
+    fireEvent.click(bar1);
+
+    expect(onDayDrillDown).toHaveBeenCalledTimes(1);
+    expect(onDayDrillDown).toHaveBeenCalledWith("2026-07-30");
+    expect(onRangeSelect).toHaveBeenLastCalledWith(null);
   });
 });
