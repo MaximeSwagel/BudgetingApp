@@ -679,17 +679,6 @@ tbody tr:hover {
 
 /* ---------- Dashboard ---------- */
 
-.dash {
-  --series: #2a78d6;      /* categorical slot 1, validated vs #fff surface */
-  --series-dim: #9ec5f4;  /* sequential step 200 — de-emphasis for past months */
-  --ink-1: #0b0b0b;
-  --ink-2: #52514e;
-  --ink-3: #898781;
-  --hairline: #e1e0d9;
-  --delta-good: #006300;
-  --delta-bad: #d03b3b;
-}
-
 .dash-period {
   color: var(--ink-3);
   font-weight: 500;
@@ -883,13 +872,6 @@ tbody tr:hover {
 }
 
 /* ---------- Analysis ---------- */
-
-.analysis {
-  --ink-1: #0b0b0b;
-  --ink-2: #52514e;
-  --ink-3: #898781;
-  --hairline: #e1e0d9;
-}
 
 .analysis-chart-header {
   display: flex;
