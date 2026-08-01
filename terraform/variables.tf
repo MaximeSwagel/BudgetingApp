@@ -52,3 +52,10 @@ variable "openai_api_key" {
   default     = ""
   sensitive   = true
 }
+
+variable "anthropic_api_key" {
+  description = "Anthropic API key for transaction categorization (optional; blank -> Claude just returns Uncategorized)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}

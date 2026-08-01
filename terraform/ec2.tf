@@ -52,20 +52,32 @@ resource "aws_instance" "app" {
   iam_instance_profile   = aws_iam_instance_profile.app_instance.name
 
   user_data = templatefile("${path.module}/user_data.sh.tpl", {
-    aws_region        = var.aws_region
-    db_endpoint       = aws_db_instance.postgres.address
-    db_port           = aws_db_instance.postgres.port
-    db_name           = var.db_name
-    db_username       = var.db_username
-    db_ssm_param      = aws_ssm_parameter.db_password.name
-    openai_ssm_param  = aws_ssm_parameter.openai_api_key.name
-    base_currency     = var.base_currency
-    ecr_backend       = aws_ecr_repository.backend.repository_url
-    ecr_frontend      = aws_ecr_repository.frontend.repository_url
+    aws_region          = var.aws_region
+    db_endpoint         = aws_db_instance.postgres.address
+    db_port             = aws_db_instance.postgres.port
+    db_name             = var.db_name
+    db_username         = var.db_username
+    db_ssm_param        = aws_ssm_parameter.db_password.name
+    openai_ssm_param    = aws_ssm_parameter.openai_api_key.name
+    anthropic_ssm_param = aws_ssm_parameter.anthropic_api_key.name
+    base_currency       = var.base_currency
+    ecr_backend         = aws_ecr_repository.backend.repository_url
+    ecr_frontend        = aws_ecr_repository.frontend.repository_url
   })
   user_data_replace_on_change = true
 
   tags = {
     Name = "${var.project_name}-app"
+  }
+}
+
+# Stable public address that survives instance replacement — DNS/bookmarks
+# keep working and nothing downstream has to learn a new IP.
+resource "aws_eip" "app" {
+  instance = aws_instance.app.id
+  domain   = "vpc"
+
+  tags = {
+    Name = "${var.project_name}-app-eip"
   }
 }

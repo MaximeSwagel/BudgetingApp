@@ -35,12 +35,22 @@ async def test_upload_csv_skips_duplicates_on_second_import(client):
 
 
 @pytest.mark.asyncio
-async def test_upload_csv_unrecognized_format_raises(client):
-    # detect_bank_format() raises ValueError for an unrecognized header, and upload_csv()
-    # has no try/except around that call, so it propagates rather than returning a JSON error.
+async def test_upload_csv_unrecognized_format_records_failed_log(client):
+    # detect_bank_format() raises ValueError for an unrecognized header; upload_csv()
+    # now wraps that call so it returns a graceful JSON error instead of propagating
+    # the exception, and records a failed UploadLog audit entry for the attempt.
     files = {"file": ("weird.csv", io.BytesIO(b"foo,bar\n1,2\n"), "text/csv")}
-    with pytest.raises(ValueError, match="Unrecognized CSV format"):
-        await client.post("/api/upload", files=files)
+    resp = await client.post("/api/upload", files=files)
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "Unrecognized CSV format" in body["error"]
+
+    logs = (await client.get("/api/upload/logs")).json()["logs"]
+    assert len(logs) == 1
+    assert logs[0]["status"] == "failed"
+    assert logs[0]["filename"] == "weird.csv"
+    assert "Unrecognized CSV format" in logs[0]["error"]
 
 
 @pytest.mark.asyncio

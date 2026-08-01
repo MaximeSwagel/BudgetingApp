@@ -86,3 +86,61 @@ class UserSettings(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     key: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     value: Mapped[str] = mapped_column(String(255), nullable=False)
+
+
+class CategoryCorrection(Base):
+    """Learned merchant-to-category correction.
+
+    Recorded when the user flags a transaction as miscategorized on the
+    Transactions page, optionally naming the right category. Keyed by a
+    normalized `merchant_key` derived from the transaction description (see
+    `app.services.corrections.normalize_merchant`). Both categorization entry
+    points (CSV import and the Auto-categorize backlog run) consult this
+    table before calling the AI provider, so a merchant the user has already
+    taught is never sent to the provider again. No schema change was made to
+    `transactions` itself (see D-01 in the plan) -- all correction state
+    lives here, and a row's flag/learned status is derived at read time by
+    matching its description against this table.
+    """
+
+    __tablename__ = "category_corrections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    merchant_key: Mapped[str] = mapped_column(String(200), unique=True, index=True, nullable=False)
+    description_sample: Mapped[str] = mapped_column(Text, nullable=False)
+    # NULL category_id means "flagged as wrong but the user did not say what
+    # it should be" -- a UI indicator only, never used to categorize.
+    category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), nullable=True)
+    # What the transaction was categorized as at flag time, kept for audit
+    # and never overwritten on subsequent upserts of the same merchant_key.
+    original_category_id: Mapped[int | None] = mapped_column(ForeignKey("categories.id"), nullable=True)
+    # Plain Integer with NO ForeignKey: ImportBatchRepository.delete_with_transactions
+    # deletes transactions wholesale on undo-import, so a real FK here would
+    # either block that delete or leave a dangling reference. This column is
+    # informational only (which transaction we originally learned from).
+    source_transaction_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    # Two FKs to `categories.id` (category_id, original_category_id) require
+    # `foreign_keys` to disambiguate which one this relationship follows.
+    category: Mapped["Category | None"] = relationship(foreign_keys=[category_id])
+
+
+class UploadLog(Base):
+    """Append-only audit trail of every CSV upload attempt, success or
+    failure. Unlike ImportBatch (deleted on undo/reset), this table has no FK
+    to import_batches and is never deleted, so it survives undo/reset."""
+
+    __tablename__ = "upload_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    bank: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    format_detected: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    uploaded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    rows_parsed: Mapped[int] = mapped_column(Integer, default=0)
+    rows_imported: Mapped[int] = mapped_column(Integer, default=0)
+    rows_skipped: Mapped[int] = mapped_column(Integer, default=0)
+    rows_failed: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)

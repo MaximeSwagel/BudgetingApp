@@ -10,6 +10,11 @@ venv/
 *.db
 *.tsbuildinfo
 
+# Playwright e2e output
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+
 # GSD workflow bookkeeping (planning/roadmap state, not app code)
 .planning/
 
