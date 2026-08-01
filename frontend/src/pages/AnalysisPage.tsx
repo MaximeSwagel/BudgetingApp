@@ -4,7 +4,7 @@ import { getAnalysis } from "../api/client";
 import { formatAmount, formatMonthValue } from "../lib/format";
 import DailySpendChart from "../components/charts/DailySpendChart";
 import type { DailyPoint, DailySpendMode } from "../components/charts/DailySpendChart";
-import { PageHeader, StatusMessage, TableContainer } from "../components/ui";
+import { Button, Card, PageHeader, StatusMessage, TableContainer } from "../components/ui";
 
 interface CategoryRow {
   group: string;
@@ -115,7 +115,7 @@ export default function AnalysisPage() {
     [data]
   );
 
-  if (!data) return <div className="card">Loading...</div>;
+  if (!data) return <Card>Loading...</Card>;
 
   const currency = data.base_currency;
   const maxCategoryTotal = Math.max(...data.categories.map((c) => parseFloat(c.total)), 1);
@@ -137,38 +137,35 @@ export default function AnalysisPage() {
         </div>
       )}
 
-      <div className="card">
+      <Card>
         <div className="analysis-chart-header">
           <h3 className="dash-chart-title">Daily spend, last {data.days} days</h3>
           <div className="analysis-chart-controls">
             <div className="analysis-toggle" role="group" aria-label="Time range">
               {RANGE_OPTIONS.map((opt) => (
-                <button
+                <Button
                   key={opt}
-                  type="button"
-                  className={`btn ${days === opt ? "btn-primary" : "btn-secondary"}`}
+                  variant={days === opt ? "primary" : "secondary"}
                   aria-pressed={days === opt}
                   onClick={() => setDays(opt)}
                 >
                   {opt}d
-                </button>
+                </Button>
               ))}
             </div>
             <div className="analysis-toggle" role="group" aria-label="Chart mode">
-              <button
-                type="button"
-                className={`btn ${mode === "aggregate" ? "btn-primary" : "btn-secondary"}`}
+              <Button
+                variant={mode === "aggregate" ? "primary" : "secondary"}
                 onClick={() => setMode("aggregate")}
               >
                 Aggregate
-              </button>
-              <button
-                type="button"
-                className={`btn ${mode === "byCategory" ? "btn-primary" : "btn-secondary"}`}
+              </Button>
+              <Button
+                variant={mode === "byCategory" ? "primary" : "secondary"}
                 onClick={() => setMode("byCategory")}
               >
                 By category
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -199,10 +196,10 @@ export default function AnalysisPage() {
             )}
           </>
         )}
-      </div>
+      </Card>
 
       <div className="dash-grid">
-        <div className="card">
+        <Card>
           <h3 className="dash-chart-title">Category distribution</h3>
           {data.categories.length === 0 ? (
             <p className="dash-muted">Nothing categorized yet.</p>
@@ -226,9 +223,9 @@ export default function AnalysisPage() {
               ))}
             </div>
           )}
-        </div>
+        </Card>
 
-        <div className="card">
+        <Card>
           <h3 className="dash-chart-title">Currency breakdown</h3>
           {data.by_currency.length === 0 ? (
             <p className="dash-muted">No transactions yet.</p>
@@ -260,10 +257,10 @@ export default function AnalysisPage() {
               </table>
             </TableContainer>
           )}
-        </div>
+        </Card>
       </div>
 
-      <div className="card">
+      <Card>
         <h3 className="dash-chart-title">Duplicate detector</h3>
         {data.duplicate_groups.length === 0 ? (
           <StatusMessage variant="success">No duplicates detected.</StatusMessage>
@@ -302,16 +299,16 @@ export default function AnalysisPage() {
             </TableContainer>
           </>
         )}
-      </div>
+      </Card>
 
-      <div className="card">
+      <Card>
         <h3 className="dash-chart-title">Transactions per bank</h3>
         {data.by_bank.length === 0 ? (
           <p className="dash-muted">No transactions yet.</p>
         ) : (
           <div className="stat-row">
             {data.by_bank.map((b) => (
-              <div className="card stat-tile" key={b.bank}>
+              <Card className="stat-tile" key={b.bank}>
                 <div className="stat-label">{b.bank}</div>
                 <div className="stat-value">
                   {b.count} <span className="stat-unit">txns</span>
@@ -319,11 +316,11 @@ export default function AnalysisPage() {
                 <div className="stat-delta">
                   {formatMonthValue(b.total)} {currency}
                 </div>
-              </div>
+              </Card>
             ))}
           </div>
         )}
-      </div>
+      </Card>
     </div>
   );
 }

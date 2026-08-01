@@ -16,6 +16,7 @@ import { formatAmount } from "../lib/format";
 import { csvFilename, toCsv, TRANSACTION_CSV_HEADERS, transactionToCsvRow } from "../lib/csv";
 import {
   Badge,
+  Button,
   Card,
   FileUploadButton,
   Pagination,
@@ -400,26 +401,24 @@ export default function TransactionsPage() {
         actions={
           <>
             {resetEnabled && (
-              <button type="button" className="btn btn-danger" onClick={handleResetAll}>
+              <Button variant="danger" onClick={handleResetAll}>
                 Clear all data
-              </button>
+              </Button>
             )}
-            <button
-              type="button"
-              className="btn btn-secondary"
+            <Button
+              variant="secondary"
               onClick={handleAutoCategorize}
               disabled={categorizing}
             >
               {categorizing ? "Categorizing..." : "Auto-categorize (AI)"}
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
+            </Button>
+            <Button
+              variant="secondary"
               onClick={handleExport}
               disabled={exporting}
             >
               {exporting ? "Exporting..." : "Export to Excel"}
-            </button>
+            </Button>
           </>
         }
       />
@@ -489,14 +488,13 @@ export default function TransactionsPage() {
                   ` ${String(uploadResult.duplicates_skipped)} duplicates skipped.`}
               </span>
               {Number(uploadResult.imported) > 0 && uploadResult.batch_id != null && (
-                <button
-                  type="button"
-                  className="btn btn-secondary"
+                <Button
+                  variant="secondary"
                   onClick={handleUndoImport}
                   disabled={undoing}
                 >
                   {undoing ? "Undoing..." : "Undo import"}
-                </button>
+                </Button>
               )}
             </span>
           )}
@@ -552,13 +550,12 @@ export default function TransactionsPage() {
             onChange={(e) => setDateParam("date_to", e.target.value)}
             placeholder="To"
           />
-          <button
-            type="button"
-            className={`btn ${uncategorizedOnly ? "btn-primary" : "btn-secondary"}`}
+          <Button
+            variant={uncategorizedOnly ? "primary" : "secondary"}
             onClick={toggleUncategorized}
           >
             {uncategorizedOnly ? "Showing uncategorized only ✕" : "Uncategorized only"}
-          </button>
+          </Button>
         </div>
 
         <TableContainer
@@ -625,14 +622,13 @@ export default function TransactionsPage() {
                       {t.correction_status === "flagged" && (
                         <Badge variant="flagged">Flagged</Badge>
                       )}{" "}
-                      <button
-                        type="button"
-                        className="btn btn-secondary"
+                      <Button
+                        variant="secondary"
                         title="Flag as miscategorized"
                         onClick={() => openFlagEditor(t)}
                       >
                         🚩 Flag
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                   {flagRowId === t.id && (
@@ -659,31 +655,27 @@ export default function TransactionsPage() {
                               </optgroup>
                             ))}
                           </select>
-                          <button
-                            type="button"
-                            className="btn btn-primary"
+                          <Button
                             disabled={savingCorrection}
                             onClick={() => handleSaveCorrection(t.id)}
                           >
                             Save correction
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-secondary"
+                          </Button>
+                          <Button
+                            variant="secondary"
                             disabled={savingCorrection}
                             onClick={closeFlagEditor}
                           >
                             Cancel
-                          </button>
+                          </Button>
                           {t.correction_id != null && (
-                            <button
-                              type="button"
-                              className="btn btn-secondary"
+                            <Button
+                              variant="secondary"
                               disabled={savingCorrection}
                               onClick={() => handleRemoveCorrection(t.correction_id!)}
                             >
                               Remove correction
-                            </button>
+                            </Button>
                           )}
                         </div>
                       </td>
