@@ -14,6 +14,14 @@ function renderPage() {
   );
 }
 
+function renderPageAt(url: string) {
+  return render(
+    <MemoryRouter initialEntries={[url]}>
+      <TransactionsPage />
+    </MemoryRouter>
+  );
+}
+
 describe("TransactionsPage", () => {
   beforeEach(() => {
     vi.mocked(api.getTransactions).mockReset();
@@ -268,5 +276,36 @@ describe("TransactionsPage", () => {
     fireEvent.click(screen.getByText("Remove correction"));
 
     await waitFor(() => expect(api.deleteCorrection).toHaveBeenCalledWith(9));
+  });
+
+  it("filters on mount using date_from/date_to from the URL", async () => {
+    vi.mocked(api.getTransactions).mockResolvedValue({ transactions: [], total: 0 });
+
+    renderPageAt("/transactions?date_from=2026-01-01&date_to=2026-01-31");
+
+    await waitFor(() =>
+      expect(api.getTransactions).toHaveBeenCalledWith(
+        expect.objectContaining({ date_from: "2026-01-01", date_to: "2026-01-31" })
+      )
+    );
+  });
+
+  it("preserves the URL's date params when toggling uncategorized only", async () => {
+    vi.mocked(api.getTransactions).mockResolvedValue({ transactions: [], total: 0 });
+
+    renderPageAt("/transactions?date_from=2026-01-01&date_to=2026-01-31");
+
+    await waitFor(() => expect(screen.getByText("Uncategorized only")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Uncategorized only"));
+
+    await waitFor(() =>
+      expect(api.getTransactions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          date_from: "2026-01-01",
+          date_to: "2026-01-31",
+          uncategorized: "true",
+        })
+      )
+    );
   });
 });

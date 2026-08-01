@@ -77,15 +77,17 @@ export default function TransactionsPage() {
     bank: "",
     currency: "",
     category_group: "",
-    date_from: "",
-    date_to: "",
   });
+  const dateFrom = searchParams.get("date_from") ?? "";
+  const dateTo = searchParams.get("date_to") ?? "";
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadData = useCallback(async () => {
     const [txRes, catRes] = await Promise.all([
       getTransactions({
         ...filters,
+        date_from: dateFrom,
+        date_to: dateTo,
         uncategorized: uncategorizedOnly ? "true" : "",
         page: String(page),
         page_size: "50",
@@ -95,11 +97,32 @@ export default function TransactionsPage() {
     setTransactions(txRes.transactions || []);
     setTotal(txRes.total || 0);
     setCategories(catRes || []);
-  }, [filters, page, uncategorizedOnly]);
+  }, [filters, page, uncategorizedOnly, dateFrom, dateTo]);
 
   const toggleUncategorized = () => {
     setPage(1);
-    setSearchParams(uncategorizedOnly ? {} : { uncategorized: "1" });
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (uncategorizedOnly) {
+        next.delete("uncategorized");
+      } else {
+        next.set("uncategorized", "1");
+      }
+      return next;
+    });
+  };
+
+  const setDateParam = (key: "date_from" | "date_to", value: string) => {
+    setPage(1);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value) {
+        next.set(key, value);
+      } else {
+        next.delete(key);
+      }
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -450,18 +473,14 @@ export default function TransactionsPage() {
           </select>
           <input
             type="date"
-            value={filters.date_from}
-            onChange={(e) =>
-              setFilters((f) => ({ ...f, date_from: e.target.value }))
-            }
+            value={dateFrom}
+            onChange={(e) => setDateParam("date_from", e.target.value)}
             placeholder="From"
           />
           <input
             type="date"
-            value={filters.date_to}
-            onChange={(e) =>
-              setFilters((f) => ({ ...f, date_to: e.target.value }))
-            }
+            value={dateTo}
+            onChange={(e) => setDateParam("date_to", e.target.value)}
             placeholder="To"
           />
           <button
