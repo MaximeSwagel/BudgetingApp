@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { getAnalysis } from "../api/client";
 import { formatAmount, formatMonthValue } from "../lib/format";
 import DailySpendChart from "../components/charts/DailySpendChart";
@@ -50,6 +50,15 @@ interface AnalysisData {
 // the smallest categories into "Other" rather than adding a 9th color.
 const MAX_STACK_SLOTS = 8;
 
+// Quick time-range presets for the daily-spend chart's window selector.
+const RANGE_OPTIONS = [7, 30, 90, 180, 365];
+
+function formatRangeDate(date: string): string {
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) return date;
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
 /**
  * Fold the daily `by_category` buckets down to at most `MAX_STACK_SLOTS`
  * stack keys, keeping the largest-total categories (across the whole window)
@@ -92,10 +101,14 @@ function buildChartSeries(daily: DailyPoint[]): { categories: string[]; daily: D
 export default function AnalysisPage() {
   const [data, setData] = useState<AnalysisData | null>(null);
   const [mode, setMode] = useState<DailySpendMode>("aggregate");
+  const [days, setDays] = useState(90);
+  const [range, setRange] = useState<{ from: string; to: string; count: number } | null>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
-    getAnalysis().then(setData);
-  }, []);
+    setRange(null);
+    getAnalysis(days).then(setData);
+  }, [days]);
 
   const chart = useMemo(
     () => (data ? buildChartSeries(data.daily) : { categories: [] as string[], daily: [] as DailyPoint[] }),
@@ -127,27 +140,64 @@ export default function AnalysisPage() {
       <div className="card">
         <div className="analysis-chart-header">
           <h3 className="dash-chart-title">Daily spend, last {data.days} days</h3>
-          <div className="analysis-toggle" role="group" aria-label="Chart mode">
-            <button
-              type="button"
-              className={`btn ${mode === "aggregate" ? "btn-primary" : "btn-secondary"}`}
-              onClick={() => setMode("aggregate")}
-            >
-              Aggregate
-            </button>
-            <button
-              type="button"
-              className={`btn ${mode === "byCategory" ? "btn-primary" : "btn-secondary"}`}
-              onClick={() => setMode("byCategory")}
-            >
-              By category
-            </button>
+          <div className="analysis-chart-controls">
+            <div className="analysis-toggle" role="group" aria-label="Time range">
+              {RANGE_OPTIONS.map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  className={`btn ${days === opt ? "btn-primary" : "btn-secondary"}`}
+                  aria-pressed={days === opt}
+                  onClick={() => setDays(opt)}
+                >
+                  {opt}d
+                </button>
+              ))}
+            </div>
+            <div className="analysis-toggle" role="group" aria-label="Chart mode">
+              <button
+                type="button"
+                className={`btn ${mode === "aggregate" ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setMode("aggregate")}
+              >
+                Aggregate
+              </button>
+              <button
+                type="button"
+                className={`btn ${mode === "byCategory" ? "btn-primary" : "btn-secondary"}`}
+                onClick={() => setMode("byCategory")}
+              >
+                By category
+              </button>
+            </div>
           </div>
         </div>
         {chart.daily.length === 0 ? (
           <p className="dash-muted">No spend in this window yet.</p>
         ) : (
-          <DailySpendChart data={chart.daily} categories={chart.categories} currency={currency} mode={mode} />
+          <>
+            <DailySpendChart
+              data={chart.daily}
+              categories={chart.categories}
+              currency={currency}
+              mode={mode}
+              onDayDrillDown={(date) => navigate(`/transactions?date_from=${date}&date_to=${date}`)}
+              onRangeSelect={setRange}
+            />
+            <p className="dash-muted">
+              Double-click a bar to view a single day, or drag the slider under the chart to pick a
+              range.
+            </p>
+            {range && (
+              <Link
+                to={`/transactions?date_from=${range.from}&date_to=${range.to}`}
+                className="btn btn-secondary analysis-range-cta"
+              >
+                View {range.count} days ({formatRangeDate(range.from)}–{formatRangeDate(range.to)}) in
+                Transactions →
+              </Link>
+            )}
+          </>
         )}
       </div>
 

@@ -1,6 +1,8 @@
+import { useRef } from "react";
 import {
   Bar,
   BarChart,
+  Brush,
   CartesianGrid,
   Legend,
   ResponsiveContainer,
@@ -23,7 +25,15 @@ export interface DailySpendChartProps {
   categories: string[];
   currency: string;
   mode: DailySpendMode;
+  /** Fired once when the same bar index is clicked twice within the double-click window. */
+  onDayDrillDown?: (date: string) => void;
+  /** Fired on every Brush change; null when the selection is the Brush's resting/full-span state. */
+  onRangeSelect?: (range: { from: string; to: string; count: number } | null) => void;
 }
+
+// Two clicks on the same bar index within this window count as a
+// double-click drill-down; anything slower (or a different index) resets.
+const DOUBLE_CLICK_MS = 400;
 
 // Categorical palette per the dataviz skill's validated default order --
 // fixed slot order, never cycled or reshuffled. Clears the adjacent-pair
@@ -62,7 +72,14 @@ function formatValue(value: number): string {
  * zero. There is intentionally no second chart component -- callers toggle
  * `mode` instead.
  */
-export default function DailySpendChart({ data, categories, currency, mode }: DailySpendChartProps) {
+export default function DailySpendChart({
+  data,
+  categories,
+  currency,
+  mode,
+  onDayDrillDown,
+  onRangeSelect,
+}: DailySpendChartProps) {
   const rows = data.map((d) => {
     const row: Record<string, number | string> = { date: d.date, total: parseFloat(d.total) };
     for (const cat of categories) {
@@ -70,6 +87,39 @@ export default function DailySpendChart({ data, categories, currency, mode }: Da
     }
     return row;
   });
+
+  const lastClickRef = useRef<{ index: number; at: number } | null>(null);
+
+  const handleBarClick = (_entry: unknown, index: number) => {
+    const last = lastClickRef.current;
+    if (last && last.index === index && Date.now() - last.at <= DOUBLE_CLICK_MS) {
+      lastClickRef.current = null;
+      const date = rows[index]?.date;
+      if (typeof date === "string") onDayDrillDown?.(date);
+      return;
+    }
+    lastClickRef.current = { index, at: Date.now() };
+  };
+
+  const handleBrushChange = (range?: { startIndex?: number; endIndex?: number }) => {
+    const startIndex = range?.startIndex;
+    const endIndex = range?.endIndex;
+    if (startIndex == null || endIndex == null) {
+      onRangeSelect?.(null);
+      return;
+    }
+    const from = rows[startIndex]?.date;
+    const to = rows[endIndex]?.date;
+    if (typeof from !== "string" || typeof to !== "string") {
+      onRangeSelect?.(null);
+      return;
+    }
+    if (startIndex === 0 && endIndex === rows.length - 1) {
+      onRangeSelect?.(null);
+      return;
+    }
+    onRangeSelect?.({ from, to, count: endIndex - startIndex + 1 });
+  };
 
   return (
     <ResponsiveContainer width="100%" height={280}>
@@ -96,7 +146,15 @@ export default function DailySpendChart({ data, categories, currency, mode }: Da
           contentStyle={{ borderRadius: 8, border: `1px solid ${GRID_COLOR}`, fontSize: 13 }}
         />
         {mode === "aggregate" ? (
-          <Bar dataKey="total" name="Spend" fill={SERIES_COLORS[0]} radius={[4, 4, 0, 0]} maxBarSize={24} />
+          <Bar
+            dataKey="total"
+            name="Spend"
+            fill={SERIES_COLORS[0]}
+            radius={[4, 4, 0, 0]}
+            maxBarSize={24}
+            cursor="pointer"
+            onClick={handleBarClick}
+          />
         ) : (
           <>
             <Legend wrapperStyle={{ fontSize: 12 }} />
@@ -110,10 +168,21 @@ export default function DailySpendChart({ data, categories, currency, mode }: Da
                 stroke={SURFACE_COLOR}
                 strokeWidth={2}
                 maxBarSize={24}
+                cursor="pointer"
+                onClick={handleBarClick}
               />
             ))}
           </>
         )}
+        <Brush
+          dataKey="date"
+          height={26}
+          travellerWidth={8}
+          stroke={AXIS_COLOR}
+          fill={SURFACE_COLOR}
+          tickFormatter={formatDateTick}
+          onChange={handleBrushChange}
+        />
       </BarChart>
     </ResponsiveContainer>
   );

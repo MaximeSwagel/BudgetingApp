@@ -25,6 +25,9 @@ vi.mock("recharts", () => {
     CartesianGrid: Inert,
     Tooltip: Inert,
     Legend: () => <div data-testid="chart-legend" />,
+    Brush: ({ onChange }: { onChange?: (range?: { startIndex?: number; endIndex?: number }) => void }) => (
+      <button type="button" data-testid="chart-brush" onClick={() => onChange?.({ startIndex: 0, endIndex: 1 })} />
+    ),
   };
 });
 
@@ -129,5 +132,51 @@ describe("AnalysisPage", () => {
     expect(byCategoryBtn).toHaveClass("btn-primary");
     expect(screen.getByText("Aggregate")).toHaveClass("btn-secondary");
     expect(screen.getByTestId("chart-legend")).toBeInTheDocument();
+  });
+
+  it("loads the default 90-day window on mount", async () => {
+    vi.mocked(api.getAnalysis).mockResolvedValue(BASE_DATA);
+
+    renderPage();
+
+    await waitFor(() => expect(api.getAnalysis).toHaveBeenCalledWith(90));
+  });
+
+  it("switches the range window when a preset button is clicked", async () => {
+    vi.mocked(api.getAnalysis).mockResolvedValue(BASE_DATA);
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("30d")).toBeInTheDocument());
+    await userEvent.click(screen.getByText("30d"));
+
+    await waitFor(() => expect(api.getAnalysis).toHaveBeenCalledWith(30));
+    expect(screen.getByText("30d")).toHaveClass("btn-primary");
+    expect(screen.getByText("90d")).toHaveClass("btn-secondary");
+  });
+
+  it("surfaces a Transactions link for a brush-selected range", async () => {
+    const rangeData = {
+      ...BASE_DATA,
+      daily: [
+        { date: "2026-07-29", total: "10.00", by_category: { Groceries: "10.00" } },
+        { date: "2026-07-30", total: "20.00", by_category: { Groceries: "20.00" } },
+        { date: "2026-07-31", total: "30.00", by_category: { Groceries: "30.00" } },
+      ],
+    };
+    vi.mocked(api.getAnalysis).mockResolvedValue(rangeData);
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId("chart-brush")).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId("chart-brush"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/View 2 days/)).toBeInTheDocument()
+    );
+    expect(screen.getByText(/View 2 days/).closest("a")).toHaveAttribute(
+      "href",
+      "/transactions?date_from=2026-07-29&date_to=2026-07-30"
+    );
   });
 });

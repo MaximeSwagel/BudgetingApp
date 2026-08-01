@@ -792,6 +792,17 @@ tbody tr:hover {
   gap: 0.5rem;
 }
 
+.analysis-chart-controls {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.analysis-range-cta {
+  margin-top: 0.75rem;
+}
+
 @media (max-width: 640px) {
   .analysis-chart-header {
     flex-direction: column;
