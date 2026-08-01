@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 
-export type BadgeVariant = "bank" | "currency";
+export type BadgeVariant = "bank" | "currency" | "flagged" | "corrected";
 
 export interface BadgeProps {
   variant: BadgeVariant;

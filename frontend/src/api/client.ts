@@ -86,6 +86,23 @@ export async function getUploadLogs() {
   return res.json();
 }
 
+export async function createCorrection(
+  transactionId: number,
+  categoryId: number | null
+) {
+  const res = await fetch(`${BASE}/corrections`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ transaction_id: transactionId, category_id: categoryId }),
+  });
+  return res.json();
+}
+
+export async function deleteCorrection(correctionId: number) {
+  const res = await fetch(`${BASE}/corrections/${correctionId}`, { method: "DELETE" });
+  return res.json();
+}
+
 export async function getAnalysis(days?: number) {
   const qs = days ? `?days=${days}` : "";
   const res = await fetch(`${BASE}/analysis${qs}`);

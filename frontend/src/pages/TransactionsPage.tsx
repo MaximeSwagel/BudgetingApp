@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   autoCategorize,
+  createCorrection,
+  deleteCorrection,
   getCategories,
   getFeatures,
   getTransactions,
@@ -35,6 +37,8 @@ interface Transaction {
   category: string | null;
   category_id: number | null;
   is_expense: boolean;
+  correction_status?: "flagged" | "corrected" | null;
+  correction_id?: number | null;
 }
 
 interface CategoryGroup {
@@ -66,6 +70,9 @@ export default function TransactionsPage() {
   const [undoing, setUndoing] = useState(false);
   const [resetEnabled, setResetEnabled] = useState(false);
   const [categorizing, setCategorizing] = useState(false);
+  const [flagRowId, setFlagRowId] = useState<number | null>(null);
+  const [flagCategoryId, setFlagCategoryId] = useState("");
+  const [savingCorrection, setSavingCorrection] = useState(false);
   const [filters, setFilters] = useState({
     bank: "",
     currency: "",
@@ -229,6 +236,48 @@ export default function TransactionsPage() {
     await loadData();
   };
 
+  const openFlagEditor = (t: Transaction) => {
+    if (flagRowId === t.id) {
+      setFlagRowId(null);
+      return;
+    }
+    setFlagRowId(t.id);
+    setFlagCategoryId(t.category_id != null ? String(t.category_id) : "");
+  };
+
+  const closeFlagEditor = () => {
+    setFlagRowId(null);
+    setFlagCategoryId("");
+  };
+
+  const handleSaveCorrection = async (txnId: number) => {
+    setSavingCorrection(true);
+    const categoryId = flagCategoryId === "" ? null : Number(flagCategoryId);
+    const result = await createCorrection(txnId, categoryId);
+    setSavingCorrection(false);
+    setUploadResult(
+      result.error
+        ? { error: String(result.error) }
+        : {
+            correction: true,
+            updated_transactions: result.updated_transactions,
+          }
+    );
+    closeFlagEditor();
+    await loadData();
+  };
+
+  const handleRemoveCorrection = async (correctionId: number) => {
+    setSavingCorrection(true);
+    const result = await deleteCorrection(correctionId);
+    setSavingCorrection(false);
+    setUploadResult(
+      result.error ? { error: String(result.error) } : { correctionRemoved: true }
+    );
+    closeFlagEditor();
+    await loadData();
+  };
+
   const totalPages = Math.ceil(total / 50);
 
   const uniqueBanks = [...new Set(transactions.map((t) => t.bank))];
@@ -332,6 +381,13 @@ export default function TransactionsPage() {
             </span>
           ) : uploadResult.reset ? (
             <span>All data cleared — {String(uploadResult.deleted)} transactions removed.</span>
+          ) : uploadResult.correction ? (
+            <span>
+              Correction saved — {String(uploadResult.updated_transactions)} transaction
+              {Number(uploadResult.updated_transactions) === 1 ? "" : "s"} updated.
+            </span>
+          ) : uploadResult.correctionRemoved ? (
+            <span>Correction removed.</span>
           ) : (
             <span className="status-with-action">
               <span>
@@ -428,52 +484,125 @@ export default function TransactionsPage() {
                 <th>Converted</th>
                 <th>Bank</th>
                 <th>Category</th>
+                <th>Review</th>
               </tr>
             </thead>
             <tbody>
               {transactions.map((t) => (
-                <tr key={t.id}>
-                  <td>{new Date(t.date).toLocaleDateString("en-GB")}</td>
-                  <td>{t.description}</td>
-                  <td className={t.is_expense ? "amount-negative" : "amount-positive"}>
-                    {formatAmount(t.original_amount, t.is_expense)}
-                  </td>
-                  <td>
-                    <Badge variant="currency">{t.original_currency}</Badge>
-                  </td>
-                  <td className={t.is_expense ? "amount-negative" : "amount-positive"}>
-                    {t.converted_amount
-                      ? `${formatAmount(t.converted_amount, t.is_expense)} ${t.base_currency}`
-                      : "-"}
-                  </td>
-                  <td>
-                    <Badge variant="bank">{t.bank}</Badge>
-                  </td>
-                  <td>
-                    <select
-                      className="category-select"
-                      value={t.category_id ?? ""}
-                      onChange={(e) =>
-                        handleCategoryChange(t.id, Number(e.target.value))
-                      }
-                    >
-                      <option value="">Uncategorized</option>
-                      {categories.map((g) => (
-                        <optgroup key={g.id} label={g.name}>
-                          {g.categories.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))}
-                    </select>
-                  </td>
-                </tr>
+                <Fragment key={t.id}>
+                  <tr>
+                    <td>{new Date(t.date).toLocaleDateString("en-GB")}</td>
+                    <td>{t.description}</td>
+                    <td className={t.is_expense ? "amount-negative" : "amount-positive"}>
+                      {formatAmount(t.original_amount, t.is_expense)}
+                    </td>
+                    <td>
+                      <Badge variant="currency">{t.original_currency}</Badge>
+                    </td>
+                    <td className={t.is_expense ? "amount-negative" : "amount-positive"}>
+                      {t.converted_amount
+                        ? `${formatAmount(t.converted_amount, t.is_expense)} ${t.base_currency}`
+                        : "-"}
+                    </td>
+                    <td>
+                      <Badge variant="bank">{t.bank}</Badge>
+                    </td>
+                    <td>
+                      <select
+                        className="category-select"
+                        value={t.category_id ?? ""}
+                        onChange={(e) =>
+                          handleCategoryChange(t.id, Number(e.target.value))
+                        }
+                      >
+                        <option value="">Uncategorized</option>
+                        {categories.map((g) => (
+                          <optgroup key={g.id} label={g.name}>
+                            {g.categories.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      {t.correction_status === "corrected" && (
+                        <Badge variant="corrected">Learned</Badge>
+                      )}
+                      {t.correction_status === "flagged" && (
+                        <Badge variant="flagged">Flagged</Badge>
+                      )}{" "}
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        title="Flag as miscategorized"
+                        onClick={() => openFlagEditor(t)}
+                      >
+                        🚩 Flag
+                      </button>
+                    </td>
+                  </tr>
+                  {flagRowId === t.id && (
+                    <tr className="correction-row">
+                      <td colSpan={8}>
+                        <div>
+                          Teach the categorizer about “{t.description}” — future imports of
+                          this merchant will use the category you pick below.
+                        </div>
+                        <div className="correction-row-controls">
+                          <select
+                            className="category-select"
+                            value={flagCategoryId}
+                            onChange={(e) => setFlagCategoryId(e.target.value)}
+                          >
+                            <option value="">Not sure — just flag it</option>
+                            {categories.map((g) => (
+                              <optgroup key={g.id} label={g.name}>
+                                {g.categories.map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {c.name}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="btn btn-primary"
+                            disabled={savingCorrection}
+                            onClick={() => handleSaveCorrection(t.id)}
+                          >
+                            Save correction
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary"
+                            disabled={savingCorrection}
+                            onClick={closeFlagEditor}
+                          >
+                            Cancel
+                          </button>
+                          {t.correction_id != null && (
+                            <button
+                              type="button"
+                              className="btn btn-secondary"
+                              disabled={savingCorrection}
+                              onClick={() => handleRemoveCorrection(t.correction_id!)}
+                            >
+                              Remove correction
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
               {transactions.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="empty-state">
+                  <td colSpan={8} className="empty-state">
                     No transactions yet. Upload a CSV to get started.
                   </td>
                 </tr>

@@ -141,4 +141,132 @@ describe("TransactionsPage", () => {
       expect(screen.getByText(/All data cleared — 7 transactions removed/)).toBeInTheDocument()
     );
   });
+
+  const baseTxn = {
+    id: 1,
+    date: "2026-01-05T10:00:00",
+    description: "Super Yuda",
+    original_amount: "-20.00",
+    original_currency: "ILS",
+    converted_amount: "-20.00",
+    base_currency: "ILS",
+    exchange_rate: "1",
+    bank: "Revolut",
+    category_group: null,
+    category: null,
+    category_id: null,
+    is_expense: true,
+  };
+
+  it("renders a flag action button on every row", async () => {
+    vi.mocked(api.getTransactions).mockResolvedValue({ total: 1, transactions: [baseTxn] });
+
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /flag/i })).toBeInTheDocument()
+    );
+  });
+
+  it("shows a Learned badge for a corrected row and no badge when correction_status is absent", async () => {
+    vi.mocked(api.getTransactions).mockResolvedValue({
+      total: 1,
+      transactions: [{ ...baseTxn, correction_status: "corrected", correction_id: 5 }],
+    });
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Learned")).toBeInTheDocument());
+    expect(screen.queryByText("Flagged")).not.toBeInTheDocument();
+  });
+
+  it("shows a Flagged badge for a flag-only row", async () => {
+    vi.mocked(api.getTransactions).mockResolvedValue({
+      total: 1,
+      transactions: [{ ...baseTxn, correction_status: "flagged", correction_id: 6 }],
+    });
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Flagged")).toBeInTheDocument());
+    expect(screen.queryByText("Learned")).not.toBeInTheDocument();
+  });
+
+  it("renders no correction badge when correction_status is null", async () => {
+    vi.mocked(api.getTransactions).mockResolvedValue({
+      total: 1,
+      transactions: [{ ...baseTxn, correction_status: null, correction_id: null }],
+    });
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Super Yuda")).toBeInTheDocument());
+    expect(screen.queryByText("Learned")).not.toBeInTheDocument();
+    expect(screen.queryByText("Flagged")).not.toBeInTheDocument();
+  });
+
+  it("clicking the flag button reveals an inline editor with a category select", async () => {
+    vi.mocked(api.getTransactions).mockResolvedValue({ total: 1, transactions: [baseTxn] });
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /flag/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /flag/i }));
+
+    expect(screen.getByText(/Teach the categorizer/)).toBeInTheDocument();
+    expect(screen.getByText("Save correction")).toBeInTheDocument();
+  });
+
+  it("saves a correction with a category and reloads", async () => {
+    vi.mocked(api.getTransactions).mockResolvedValue({ total: 1, transactions: [baseTxn] });
+    vi.mocked(api.createCorrection).mockResolvedValue({ ok: true, updated_transactions: 2 });
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /flag/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /flag/i }));
+
+    const select = screen.getByDisplayValue("Not sure — just flag it") as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "10" } });
+    fireEvent.click(screen.getByText("Save correction"));
+
+    await waitFor(() =>
+      expect(api.createCorrection).toHaveBeenCalledWith(baseTxn.id, 10)
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/Correction saved — 2 transactions updated/)).toBeInTheDocument()
+    );
+  });
+
+  it("saves a correction without a category using a null category id", async () => {
+    vi.mocked(api.getTransactions).mockResolvedValue({ total: 1, transactions: [baseTxn] });
+    vi.mocked(api.createCorrection).mockResolvedValue({ ok: true, updated_transactions: 0 });
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /flag/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /flag/i }));
+    fireEvent.click(screen.getByText("Save correction"));
+
+    await waitFor(() =>
+      expect(api.createCorrection).toHaveBeenCalledWith(baseTxn.id, null)
+    );
+  });
+
+  it("offers removal for a row that already has a correction and calls deleteCorrection", async () => {
+    vi.mocked(api.getTransactions).mockResolvedValue({
+      total: 1,
+      transactions: [{ ...baseTxn, correction_status: "flagged", correction_id: 9 }],
+    });
+    vi.mocked(api.deleteCorrection).mockResolvedValue({ ok: true });
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /flag/i })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /flag/i }));
+
+    fireEvent.click(screen.getByText("Remove correction"));
+
+    await waitFor(() => expect(api.deleteCorrection).toHaveBeenCalledWith(9));
+  });
 });

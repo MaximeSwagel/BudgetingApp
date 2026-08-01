@@ -341,6 +341,33 @@ tbody tr:hover {
   color: var(--color-purple);
 }
 
+.badge-flagged {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.badge-corrected {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Correction row (inline flag-as-miscategorized editor)                  */
+/* ---------------------------------------------------------------------- */
+
+.correction-row td {
+  background: var(--color-bg);
+  padding: var(--space-3) var(--space-4);
+}
+
+.correction-row-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}
+
 /* ---------------------------------------------------------------------- */
 /* Budget table                                                            */
 /* ---------------------------------------------------------------------- */
