@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getDashboard } from "../api/client";
 import { formatMonthValue } from "../lib/format";
+import { Card, PageHeader } from "../components/ui";
 
 interface MonthTotals {
   year: number;
@@ -33,7 +34,7 @@ export default function DashboardPage() {
     getDashboard().then(setData);
   }, []);
 
-  if (!data) return <div className="card">Loading...</div>;
+  if (!data) return <Card>Loading...</Card>;
 
   const cur = data.current_month;
   const spent = parseFloat(cur.expenses);
@@ -54,24 +55,26 @@ export default function DashboardPage() {
 
   return (
     <div className="dash">
-      <div className="page-header">
-        <h2>Dashboard</h2>
-        <span className="dash-period">
-          {monthLabel(cur)} {cur.year}
-        </span>
-      </div>
+      <PageHeader
+        title="Dashboard"
+        actions={
+          <span className="dash-period">
+            {monthLabel(cur)} {cur.year}
+          </span>
+        }
+      />
 
       {!hasAnyData && (
-        <div className="card dash-empty">
+        <Card className="dash-empty">
           <p>No data yet — upload a bank CSV to see your spending here.</p>
           <Link to="/transactions" className="btn btn-primary">
             Upload transactions
           </Link>
-        </div>
+        </Card>
       )}
 
       <div className="stat-row">
-        <div className="card stat-tile">
+        <Card className="stat-tile">
           <div className="stat-label">Spent this month</div>
           <div className="stat-value">
             {formatMonthValue(cur.expenses) === "-" ? "0" : formatMonthValue(cur.expenses)}{" "}
@@ -83,15 +86,15 @@ export default function DashboardPage() {
               {spentDeltaPct.toFixed(0)}% vs {prev ? monthLabel(prev) : ""}
             </div>
           )}
-        </div>
-        <div className="card stat-tile">
+        </Card>
+        <Card className="stat-tile">
           <div className="stat-label">Income this month</div>
           <div className="stat-value">
             {formatMonthValue(cur.income) === "-" ? "0" : formatMonthValue(cur.income)}{" "}
             <span className="stat-unit">{currency}</span>
           </div>
-        </div>
-        <div className="card stat-tile">
+        </Card>
+        <Card className="stat-tile">
           <div className="stat-label">Net this month</div>
           <div className="stat-value">
             {net < 0 ? "-" : ""}
@@ -101,7 +104,7 @@ export default function DashboardPage() {
           <div className={`stat-delta ${net >= 0 ? "delta-good" : "delta-bad"}`}>
             {net >= 0 ? "saving" : "overspending"}
           </div>
-        </div>
+        </Card>
       </div>
 
       {data.uncategorized_count > 0 && (
@@ -118,7 +121,7 @@ export default function DashboardPage() {
       )}
 
       <div className="dash-grid">
-        <div className="card">
+        <Card>
           <h3 className="dash-chart-title">Spending, last 6 months</h3>
           <div className="trend" role="img" aria-label="Monthly spending column chart">
             {data.months.map((m) => {
@@ -142,9 +145,9 @@ export default function DashboardPage() {
               );
             })}
           </div>
-        </div>
+        </Card>
 
-        <div className="card">
+        <Card>
           <h3 className="dash-chart-title">This month by group</h3>
           {cur.by_group.length === 0 ? (
             <p className="dash-muted">
@@ -166,7 +169,7 @@ export default function DashboardPage() {
               ))}
             </div>
           )}
-        </div>
+        </Card>
       </div>
     </div>
   );

@@ -34,6 +34,8 @@
   --color-success-strong: #155724;
   --color-info: #0277bd;
   --color-info-soft: #e8f4fd;
+  --color-warning-soft: #fff3cd;
+  --color-warning-strong: #856404;
   --color-purple: #7b1fa2;
   --color-purple-soft: #f3e5f5;
   --color-neutral-soft: #e9ecef;
@@ -87,4 +89,14 @@
      used inside @media queries, so these document the values used below) */
   /* --bp-sm: 640px */
   /* --bp-md: 860px */
+
+  /* Chart / data-ink palette (was redefined per-page in index.css) */
+  --series: #2a78d6; /* categorical slot 1, validated vs #fff surface */
+  --series-dim: #9ec5f4; /* sequential step 200 -- de-emphasis for past months */
+  --ink-1: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-3: #898781;
+  --hairline: #e1e0d9;
+  --delta-good: #006300;
+  --delta-bad: #d03b3b;
 }
