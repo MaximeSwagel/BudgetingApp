@@ -742,6 +742,36 @@ tbody tr:hover {
   white-space: nowrap;
 }
 
+/* ---------- Analysis ---------- */
+
+.analysis {
+  --ink-1: #0b0b0b;
+  --ink-2: #52514e;
+  --ink-3: #898781;
+  --hairline: #e1e0d9;
+}
+
+.analysis-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.analysis-toggle {
+  display: flex;
+  gap: 0.5rem;
+}
+
+@media (max-width: 640px) {
+  .analysis-chart-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
 /* ---------- Settings ---------- */
 
 .settings-grid {

@@ -85,3 +85,9 @@ export async function getUploadLogs() {
   const res = await fetch(`${BASE}/upload/logs`);
   return res.json();
 }
+
+export async function getAnalysis(days?: number) {
+  const qs = days ? `?days=${days}` : "";
+  const res = await fetch(`${BASE}/analysis${qs}`);
+  return res.json();
+}

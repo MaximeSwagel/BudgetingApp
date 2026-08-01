@@ -5,6 +5,7 @@ import Nav from "./components/layout/Nav";
 import DashboardPage from "./pages/DashboardPage";
 import TransactionsPage from "./pages/TransactionsPage";
 import BudgetPage from "./pages/BudgetPage";
+import AnalysisPage from "./pages/AnalysisPage";
 import SettingsPage from "./pages/SettingsPage";
 import "./index.css";
 
@@ -18,6 +19,7 @@ function App() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/transactions" element={<TransactionsPage />} />
             <Route path="/budget" element={<BudgetPage />} />
+            <Route path="/analysis" element={<AnalysisPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Routes>
         </main>
