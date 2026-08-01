@@ -59,6 +59,7 @@ describe("BudgetPage", () => {
 
     render(<BudgetPage />);
     await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
     fireEvent.change(screen.getByPlaceholderText("New primary category name"), {
       target: { value: "New Group" },
@@ -76,6 +77,7 @@ describe("BudgetPage", () => {
 
     render(<BudgetPage />);
     await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Remove Groceries" }));
 
@@ -92,6 +94,7 @@ describe("BudgetPage", () => {
 
     render(<BudgetPage />);
     await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Remove Groceries" }));
 
@@ -100,5 +103,45 @@ describe("BudgetPage", () => {
         screen.getByText(/Cannot delete 'Groceries': 3 transaction\(s\) are assigned to it/)
       ).toBeInTheDocument()
     );
+  });
+
+  it("hides add/remove controls until Edit is toggled on", async () => {
+    vi.mocked(api.getBudgetSummary).mockResolvedValue(SAMPLE_SUMMARY);
+
+    render(<BudgetPage />);
+    await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
+
+    expect(
+      screen.queryByPlaceholderText("New primary category name")
+    ).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("New subcategory")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Remove Groceries" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Remove Household Expenses" })
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(screen.getByPlaceholderText("New primary category name")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("New subcategory")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove Groceries" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Remove Household Expenses" })
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+    expect(
+      screen.queryByPlaceholderText("New primary category name")
+    ).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("New subcategory")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Remove Groceries" })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Remove Household Expenses" })
+    ).not.toBeInTheDocument();
   });
 });

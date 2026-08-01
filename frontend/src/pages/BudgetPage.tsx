@@ -43,6 +43,7 @@ export default function BudgetPage() {
   const [data, setData] = useState<BudgetData | null>(null);
   const [newGroupName, setNewGroupName] = useState("");
   const [newSubNames, setNewSubNames] = useState<Record<number, string>>({});
+  const [editMode, setEditMode] = useState(false);
   const [statusMsg, setStatusMsg] = useState<{ variant: "success" | "error"; text: string } | null>(
     null
   );
@@ -128,32 +129,39 @@ export default function BudgetPage() {
       <PageHeader
         title="Budget Summary"
         actions={
-          <div className="year-selector">
-            <label htmlFor="budget-year">Year:</label>
-            <select
-              id="budget-year"
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-            >
-              <option value={2025}>2025</option>
-              <option value={2026}>2026</option>
-              <option value={2027}>2027</option>
-            </select>
-          </div>
+          <>
+            <div className="year-selector">
+              <label htmlFor="budget-year">Year:</label>
+              <select
+                id="budget-year"
+                value={year}
+                onChange={(e) => setYear(Number(e.target.value))}
+              >
+                <option value={2025}>2025</option>
+                <option value={2026}>2026</option>
+                <option value={2027}>2027</option>
+              </select>
+            </div>
+            <Button variant="secondary" onClick={() => setEditMode((v) => !v)}>
+              {editMode ? "Done" : "Edit"}
+            </Button>
+          </>
         }
       />
 
-      <Card>
-        <div className="budget-add-primary">
-          <input
-            type="text"
-            placeholder="New primary category name"
-            value={newGroupName}
-            onChange={(e) => setNewGroupName(e.target.value)}
-          />
-          <Button onClick={handleAddGroup}>Add primary category</Button>
-        </div>
-      </Card>
+      {editMode && (
+        <Card>
+          <div className="budget-add-primary">
+            <input
+              type="text"
+              placeholder="New primary category name"
+              value={newGroupName}
+              onChange={(e) => setNewGroupName(e.target.value)}
+            />
+            <Button onClick={handleAddGroup}>Add primary category</Button>
+          </div>
+        </Card>
+      )}
 
       {statusMsg && <StatusMessage variant={statusMsg.variant}>{statusMsg.text}</StatusMessage>}
 
@@ -183,35 +191,37 @@ export default function BudgetPage() {
                     <td colSpan={14}>
                       <div className="group-header-row">
                         <span className="group-header-name">{group.group}</span>
-                        <span className="group-header-controls">
-                          <input
-                            type="text"
-                            className="inline-add-input"
-                            placeholder="New subcategory"
-                            value={newSubNames[group.group_id] || ""}
-                            onChange={(e) =>
-                              setNewSubNames((prev) => ({
-                                ...prev,
-                                [group.group_id]: e.target.value,
-                              }))
-                            }
-                          />
-                          <button
-                            type="button"
-                            className="btn btn-secondary btn-inline"
-                            onClick={() => handleAddSub(group.group_id)}
-                          >
-                            Add subcategory
-                          </button>
-                          <button
-                            type="button"
-                            className="btn btn-danger btn-inline"
-                            aria-label={`Remove ${group.group}`}
-                            onClick={() => handleRemoveGroup(group)}
-                          >
-                            Remove
-                          </button>
-                        </span>
+                        {editMode && (
+                          <span className="group-header-controls">
+                            <input
+                              type="text"
+                              className="inline-add-input"
+                              placeholder="New subcategory"
+                              value={newSubNames[group.group_id] || ""}
+                              onChange={(e) =>
+                                setNewSubNames((prev) => ({
+                                  ...prev,
+                                  [group.group_id]: e.target.value,
+                                }))
+                              }
+                            />
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-inline"
+                              onClick={() => handleAddSub(group.group_id)}
+                            >
+                              Add subcategory
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-inline"
+                              aria-label={`Remove ${group.group}`}
+                              onClick={() => handleRemoveGroup(group)}
+                            >
+                              Remove
+                            </button>
+                          </span>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -220,14 +230,16 @@ export default function BudgetPage() {
                       <td className="category-cell">
                         <span className="category-cell-row">
                           <span>{cat.name}</span>
-                          <button
-                            type="button"
-                            className="btn btn-danger btn-inline btn-remove-cat"
-                            aria-label={`Remove ${cat.name}`}
-                            onClick={() => handleRemoveCategory(cat)}
-                          >
-                            ×
-                          </button>
+                          {editMode && (
+                            <button
+                              type="button"
+                              className="btn btn-danger btn-inline btn-remove-cat"
+                              aria-label={`Remove ${cat.name}`}
+                              onClick={() => handleRemoveCategory(cat)}
+                            >
+                              ×
+                            </button>
+                          )}
                         </span>
                       </td>
                       {MONTHS.map((_, i) => {
