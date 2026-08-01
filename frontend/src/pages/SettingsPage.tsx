@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getAiModels, getAiSettings, getUploadLogs, updateAiSettings } from "../api/client";
+import { Button, Card, PageHeader, TableContainer } from "../components/ui";
 
 interface ModelInfo {
   id: string;
@@ -101,7 +102,7 @@ export default function SettingsPage() {
     setSaved(true);
   };
 
-  if (!settings || !catalog) return <div className="card">Loading...</div>;
+  if (!settings || !catalog) return <Card>Loading...</Card>;
 
   const currentModelId = provider === "anthropic" ? anthropicModel : openaiModel;
   const currentModels = catalog.providers[provider as "openai" | "anthropic"];
@@ -109,12 +110,9 @@ export default function SettingsPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <h2>Settings</h2>
-        <span className="dash-period">AI Categorization</span>
-      </div>
+      <PageHeader title="Settings" actions={<span className="dash-period">AI Categorization</span>} />
 
-      <div className="card settings-grid">
+      <Card className="settings-grid">
         <div className="settings-field">
           <label className="settings-label" htmlFor="provider-select">
             AI Provider
@@ -131,7 +129,7 @@ export default function SettingsPage() {
 
         <div className="settings-field">
           <span className="settings-label">API key status</span>
-          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap" }}>
+          <div className="key-status-row">
             <KeyStatus configured={settings.openai_key_configured} providerLabel="OpenAI" />
             <KeyStatus configured={settings.anthropic_key_configured} providerLabel="Claude (Anthropic)" />
           </div>
@@ -166,61 +164,59 @@ export default function SettingsPage() {
         </div>
 
         <div className="settings-field">
-          <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving}>
+          <Button onClick={handleSave} disabled={saving}>
             {saving ? "Saving..." : "Save"}
-          </button>
-          {saved && !saving && (
-            <span style={{ marginLeft: "0.75rem", color: "#155724", fontSize: "0.85rem" }}>
-              Saved.
-            </span>
-          )}
+          </Button>
+          {saved && !saving && <span className="settings-saved">Saved.</span>}
         </div>
-      </div>
+      </Card>
 
-      <div className="card">
+      <Card>
         <h3>Upload History</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>Uploaded</th>
-              <th>File</th>
-              <th>Bank/Format</th>
-              <th>Parsed</th>
-              <th>Imported</th>
-              <th>Skipped</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {logs.map((log) => (
-              <tr key={log.id}>
-                <td>{new Date(log.uploaded_at).toLocaleString("en-GB")}</td>
-                <td>{log.filename}</td>
-                <td>{log.bank || log.format_detected || "-"}</td>
-                <td>{log.rows_parsed}</td>
-                <td>{log.rows_imported}</td>
-                <td>{log.rows_skipped}</td>
-                <td>
-                  {log.status === "success" ? (
-                    "Success"
-                  ) : (
-                    <span title={log.error ?? undefined}>
-                      Failed{log.error ? `: ${log.error}` : ""}
-                    </span>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {logs.length === 0 && (
+        <TableContainer className="settings-upload-table">
+          <table>
+            <thead>
               <tr>
-                <td colSpan={7} style={{ textAlign: "center", padding: "2rem", color: "#888" }}>
-                  No uploads yet.
-                </td>
+                <th>Uploaded</th>
+                <th>File</th>
+                <th>Bank/Format</th>
+                <th>Parsed</th>
+                <th>Imported</th>
+                <th>Skipped</th>
+                <th>Status</th>
               </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {logs.map((log) => (
+                <tr key={log.id}>
+                  <td>{new Date(log.uploaded_at).toLocaleString("en-GB")}</td>
+                  <td>{log.filename}</td>
+                  <td>{log.bank || log.format_detected || "-"}</td>
+                  <td>{log.rows_parsed}</td>
+                  <td>{log.rows_imported}</td>
+                  <td>{log.rows_skipped}</td>
+                  <td>
+                    {log.status === "success" ? (
+                      "Success"
+                    ) : (
+                      <span title={log.error ?? undefined}>
+                        Failed{log.error ? `: ${log.error}` : ""}
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {logs.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="empty-state">
+                    No uploads yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </TableContainer>
+      </Card>
     </div>
   );
 }
