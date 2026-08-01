@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { csvFilename, escapeCsvField, toCsv, TRANSACTION_CSV_HEADERS, transactionToCsvRow } from "./csv";
+import {
+  budgetCsvFilename,
+  budgetCsvHeaders,
+  budgetToCsvRows,
+  csvFilename,
+  escapeCsvField,
+  toCsv,
+  TRANSACTION_CSV_HEADERS,
+  transactionToCsvRow,
+} from "./csv";
+import type { CsvBudgetSummary } from "./csv";
 
 describe("escapeCsvField", () => {
   it("emits a plain field unquoted", () => {
@@ -117,5 +127,94 @@ describe("csvFilename", () => {
   it("pads single-digit month and day", () => {
     const date = new Date(2026, 8, 9); // 9 Sep 2026
     expect(csvFilename(date)).toBe("transactions-2026-09-09.csv");
+  });
+});
+
+describe("budgetCsvHeaders", () => {
+  it("has 16 entries starting Group/Category/Jan and ending Dec/Total/% of Total", () => {
+    const headers = budgetCsvHeaders(2026);
+    expect(headers).toHaveLength(16);
+    expect(headers.slice(0, 3)).toEqual(["Group", "Category", "Jan"]);
+    expect(headers.slice(-3)).toEqual(["Dec", "Total 2026", "% of Total"]);
+  });
+});
+
+describe("budgetToCsvRows", () => {
+  const FIXTURE: CsvBudgetSummary = {
+    groups: [
+      {
+        group: "Household Expenses",
+        categories: [
+          {
+            name: "Groceries",
+            months: { "1": "-100.00", "2": "-50.00" }, // sparse -- month 3+ absent
+            annual_total: "-150.00",
+          },
+          {
+            name: "Rent",
+            months: { "1": "-1000.00" },
+            annual_total: "-1000.00",
+          },
+        ],
+      },
+      {
+        group: "Transport",
+        categories: [
+          {
+            name: "Fuel",
+            months: { "1": "-40.00" },
+            annual_total: "-40.00",
+          },
+        ],
+      },
+    ],
+    total_expense_monthly: { "1": "-1140.00", "2": "-50.00" },
+    total_expense_annual: "-1190.00",
+  };
+
+  it("emits one row per category in group order with raw amounts and empty absent months", () => {
+    const rows = budgetToCsvRows(FIXTURE);
+
+    // 3 category rows + 1 grand total row.
+    expect(rows).toHaveLength(4);
+
+    const [groceriesRow, rentRow, fuelRow] = rows;
+
+    expect(groceriesRow[0]).toBe("Household Expenses");
+    expect(groceriesRow[1]).toBe("Groceries");
+    expect(groceriesRow[2]).toBe("-100.00"); // Jan, raw string verbatim
+    expect(groceriesRow[3]).toBe("-50.00"); // Feb, raw string verbatim
+    expect(groceriesRow[4]).toBe(""); // Mar -- absent month key
+    expect(groceriesRow[groceriesRow.length - 2]).toBe("-150.00");
+    expect(groceriesRow[groceriesRow.length - 1]).toMatch(/%$/);
+
+    expect(rentRow[0]).toBe("Household Expenses");
+    expect(rentRow[1]).toBe("Rent");
+
+    expect(fuelRow[0]).toBe("Transport");
+    expect(fuelRow[1]).toBe("Fuel");
+  });
+
+  it("appends the grand total as the last row with the empty group cell and 100%", () => {
+    const rows = budgetToCsvRows(FIXTURE);
+    const lastRow = rows[rows.length - 1];
+
+    expect(lastRow[0]).toBe("");
+    expect(lastRow[1]).toBe("TOTAL EXPENSES");
+    expect(lastRow[2]).toBe("-1140.00"); // Jan
+    expect(lastRow[3]).toBe("-50.00"); // Feb
+    expect(lastRow[4]).toBe(""); // Mar -- absent
+    expect(lastRow[lastRow.length - 2]).toBe("-1190.00");
+    expect(lastRow[lastRow.length - 1]).toBe("100%");
+  });
+});
+
+describe("budgetCsvFilename", () => {
+  it("returns budget-<year>-YYYY-MM-DD.csv built from local date parts", () => {
+    expect(budgetCsvFilename(2026, new Date(2026, 0, 5))).toBe("budget-2026-2026-01-05.csv");
+  });
+
+  it("pads single-digit month and day", () => {
+    expect(budgetCsvFilename(2026, new Date(2026, 8, 9))).toBe("budget-2026-2026-09-09.csv");
   });
 });
