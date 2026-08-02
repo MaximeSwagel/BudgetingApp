@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getAnalysis } from "../api/client";
 import { formatAmount, formatMonthValue } from "../lib/format";
-import DailySpendChart from "../components/charts/DailySpendChart";
+import { filterByDateRange, summarizeDailyTotals } from "../lib/stats";
+import DailySpendChart, { AVG_LINE_COLOR, MEDIAN_LINE_COLOR } from "../components/charts/DailySpendChart";
 import type { DailyPoint, DailySpendMode } from "../components/charts/DailySpendChart";
 import { Button, Card, PageHeader, StatusMessage, TableContainer } from "../components/ui";
 
@@ -59,6 +60,21 @@ function formatRangeDate(date: string): string {
   return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
+/** Largest `by_category` entry for a single day, or null when the day has none (D-7). */
+function topCategory(day: DailyPoint | undefined): { name: string; total: string } | null {
+  if (!day) return null;
+  const entries = Object.entries(day.by_category);
+  if (entries.length === 0) return null;
+  let [name, total] = entries[0];
+  for (const [n, t] of entries.slice(1)) {
+    if (parseFloat(t) > parseFloat(total)) {
+      name = n;
+      total = t;
+    }
+  }
+  return { name, total };
+}
+
 /**
  * Fold the daily `by_category` buckets down to at most `MAX_STACK_SLOTS`
  * stack keys, keeping the largest-total categories (across the whole window)
@@ -103,10 +119,14 @@ export default function AnalysisPage() {
   const [mode, setMode] = useState<DailySpendMode>("aggregate");
   const [days, setDays] = useState(90);
   const [range, setRange] = useState<{ from: string; to: string; count: number } | null>(null);
+  const [showAvg, setShowAvg] = useState(false);
+  const [showMedian, setShowMedian] = useState(false);
+  const [selection, setSelection] = useState<{ from: string; to: string; count: number } | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     setRange(null);
+    setSelection(null);
     getAnalysis(days).then(setData);
   }, [days]);
 
@@ -114,6 +134,24 @@ export default function AnalysisPage() {
     () => (data ? buildChartSeries(data.daily) : { categories: [] as string[], daily: [] as DailyPoint[] }),
     [data]
   );
+
+  // Window stats (D-1: over days-with-spend, i.e. data.daily -- never
+  // zero-filled calendar days) power the always-visible chips and the
+  // opt-in reference lines.
+  const windowStats = useMemo(() => summarizeDailyTotals(data?.daily ?? []), [data]);
+
+  // Selection stats reuse the same summarizer over just the selected range
+  // (or single armed day, count === 1).
+  const selectionStats = useMemo(() => {
+    if (!data || !selection) return null;
+    return summarizeDailyTotals(filterByDateRange(data.daily, selection.from, selection.to));
+  }, [data, selection]);
+
+  const selectionTopCategory = useMemo(() => {
+    if (!data || !selectionStats || selectionStats.count !== 1) return null;
+    const day = data.daily.find((d) => d.date === selectionStats.peak.date);
+    return topCategory(day);
+  }, [data, selectionStats]);
 
   if (!data) return <Card>Loading...</Card>;
 
@@ -180,11 +218,82 @@ export default function AnalysisPage() {
               mode={mode}
               onDayDrillDown={(date) => navigate(`/transactions?date_from=${date}&date_to=${date}`)}
               onRangeSelect={setRange}
+              onSelectionChange={setSelection}
+              averageLine={showAvg ? windowStats?.mean ?? null : null}
+              medianLine={showMedian ? windowStats?.median ?? null : null}
             />
-            <p className="dash-muted">
-              Click a bar to start a range, then click another bar to select the interval, or
-              double-click a single bar to open that day.
-            </p>
+            {windowStats && (
+              <div className="analysis-statbar">
+                <button
+                  type="button"
+                  className="stat-chip"
+                  aria-pressed={showAvg}
+                  onClick={() => setShowAvg((v) => !v)}
+                  title={`Average daily spend across the ${windowStats.count} day${windowStats.count === 1 ? "" : "s"} with spend in this window. Click to toggle the reference line on the chart.`}
+                >
+                  <span className="stat-chip-dot" style={{ background: AVG_LINE_COLOR }} />
+                  Avg/day
+                  <strong>
+                    {formatMonthValue(windowStats.mean.toFixed(2))} {currency}
+                  </strong>
+                </button>
+                <button
+                  type="button"
+                  className="stat-chip"
+                  aria-pressed={showMedian}
+                  onClick={() => setShowMedian((v) => !v)}
+                  title={`Median daily spend across the ${windowStats.count} day${windowStats.count === 1 ? "" : "s"} with spend in this window. Click to toggle the reference line on the chart.`}
+                >
+                  <span className="stat-chip-dot" style={{ background: MEDIAN_LINE_COLOR }} />
+                  Median/day
+                  <strong>
+                    {formatMonthValue(windowStats.median.toFixed(2))} {currency}
+                  </strong>
+                </button>
+              </div>
+            )}
+            {selectionStats && (
+              <div className="analysis-selection-summary">
+                <span>Selection</span>
+                <span>
+                  Total<strong>{formatMonthValue(selectionStats.total.toFixed(2))} {currency}</strong>
+                </span>
+                {selectionStats.count === 1 ? (
+                  selectionTopCategory && (
+                    <span>
+                      Top {selectionTopCategory.name}
+                      <strong>
+                        {formatMonthValue(selectionTopCategory.total)} {currency}
+                      </strong>
+                    </span>
+                  )
+                ) : (
+                  <>
+                    <span>
+                      Avg/day<strong>{formatMonthValue(selectionStats.mean.toFixed(2))} {currency}</strong>
+                    </span>
+                    <span>
+                      Median/day
+                      <strong>
+                        {formatMonthValue(selectionStats.median.toFixed(2))} {currency}
+                      </strong>
+                    </span>
+                    <span>
+                      Peak {formatRangeDate(selectionStats.peak.date)}
+                      <strong>
+                        {formatMonthValue(selectionStats.peak.total)} {currency}
+                      </strong>
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
+            {selection === null && (
+              <p className="dash-muted">
+                Click a bar to start a range, then click another bar to select the interval, or
+                double-click a single bar to open that day.
+              </p>
+            )}
             {range && (
               <Link
                 to={`/transactions?date_from=${range.from}&date_to=${range.to}`}

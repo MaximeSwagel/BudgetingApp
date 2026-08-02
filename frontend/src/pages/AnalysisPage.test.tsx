@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -45,6 +45,7 @@ vi.mock("recharts", () => {
     Tooltip: Inert,
     Cell: Inert,
     Legend: () => <div data-testid="chart-legend" />,
+    ReferenceLine: ({ y }: { y: number }) => <div data-testid="ref-line" data-y={String(y)} />,
   };
 });
 
@@ -67,6 +68,17 @@ const BASE_DATA = {
   by_bank: [
     { bank: "Revolut", count: 2, total: "35.00" },
     { bank: "CA", count: 1, total: "58.50" },
+  ],
+};
+
+// Distinct daily totals (10/20/60) so avg (30) and median (20) are
+// distinguishable from each other in assertions.
+const CHIP_DATA = {
+  ...BASE_DATA,
+  daily: [
+    { date: "2026-07-29", total: "10.00", by_category: {} },
+    { date: "2026-07-30", total: "20.00", by_category: {} },
+    { date: "2026-07-31", total: "60.00", by_category: {} },
   ],
 };
 
@@ -196,5 +208,77 @@ describe("AnalysisPage", () => {
       "href",
       "/transactions?date_from=2026-07-29&date_to=2026-07-30"
     );
+  });
+
+  it("renders both stat chips with the computed average and median", async () => {
+    vi.mocked(api.getAnalysis).mockResolvedValue(CHIP_DATA);
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText(/Avg\/day/)).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: /Avg\/day/ })).toHaveTextContent("30");
+    expect(screen.getByRole("button", { name: /Median\/day/ })).toHaveTextContent("20");
+  });
+
+  it("toggles the average reference line on and off via its chip", async () => {
+    vi.mocked(api.getAnalysis).mockResolvedValue(CHIP_DATA);
+
+    renderPage();
+
+    const avgChip = await screen.findByRole("button", { name: /Avg\/day/ });
+    expect(screen.queryByTestId("ref-line")).not.toBeInTheDocument();
+
+    await userEvent.click(avgChip);
+    expect(avgChip).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getAllByTestId("ref-line")).toHaveLength(1);
+
+    await userEvent.click(avgChip);
+    expect(avgChip).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByTestId("ref-line")).not.toBeInTheDocument();
+  });
+
+  it("renders two reference lines when both chips are toggled on", async () => {
+    vi.mocked(api.getAnalysis).mockResolvedValue(CHIP_DATA);
+
+    renderPage();
+
+    const avgChip = await screen.findByRole("button", { name: /Avg\/day/ });
+    const medianChip = screen.getByRole("button", { name: /Median\/day/ });
+
+    await userEvent.click(avgChip);
+    await userEvent.click(medianChip);
+
+    expect(screen.getAllByTestId("ref-line")).toHaveLength(2);
+  });
+
+  it("shows a range selection summary and hides the static hint after a click-then-click range", async () => {
+    vi.mocked(api.getAnalysis).mockResolvedValue(CHIP_DATA);
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId("bar-total-0")).toBeInTheDocument());
+    expect(screen.getByText(/Click a bar to start a range/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("bar-total-0"));
+    await userEvent.click(screen.getByTestId("bar-total-2"));
+
+    await waitFor(() => expect(screen.getByText("Selection")).toBeInTheDocument());
+    const summary = screen.getByText("Selection").closest(".analysis-selection-summary") as HTMLElement;
+    // Total across all three days: 10 + 20 + 60 = 90.
+    expect(within(summary).getByText(/90/)).toBeInTheDocument();
+    expect(screen.queryByText(/Click a bar to start a range/)).not.toBeInTheDocument();
+  });
+
+  it("shows a single-day selection summary after one armed click", async () => {
+    vi.mocked(api.getAnalysis).mockResolvedValue(CHIP_DATA);
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId("bar-total-0")).toBeInTheDocument());
+    await userEvent.click(screen.getByTestId("bar-total-0"));
+
+    await waitFor(() => expect(screen.getByText("Selection")).toBeInTheDocument());
+    const summary = screen.getByText("Selection").closest(".analysis-selection-summary") as HTMLElement;
+    expect(within(summary).getByText(/10/)).toBeInTheDocument();
   });
 });
