@@ -14,6 +14,7 @@ from app.routers import (
     categories,
     corrections,
     dashboard,
+    income,
     settings as settings_router,
     transactions,
     upload,
@@ -37,6 +38,7 @@ app.include_router(categories.router)
 app.include_router(budget.router)
 app.include_router(dashboard.router)
 app.include_router(analysis.router)
+app.include_router(income.router)
 app.include_router(admin.router)
 app.include_router(settings_router.router)
 app.include_router(corrections.router)
