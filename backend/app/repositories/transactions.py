@@ -91,6 +91,23 @@ class TransactionRepository(BaseRepository[Transaction]):
         )
         return result.scalar_one_or_none()
 
+    async def list_income(self, limit: int = 5000) -> list[Transaction]:
+        """All non-duplicate income transactions (is_expense == False), oldest
+        first. No Category join -- income never has a category_id (see
+        app.services.income). `limit` is a pure safety bound, not a real page
+        size: income volume is low by definition, which is the entire premise
+        of the recurring-stream detector that consumes this."""
+        result = await self.db.execute(
+            select(Transaction)
+            .where(
+                Transaction.is_expense == False,  # noqa: E712
+                Transaction.is_duplicate == False,  # noqa: E712
+            )
+            .order_by(Transaction.date.asc(), Transaction.id.asc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def list_matching_candidates(self, first_token: str, limit: int = 1000) -> list[Transaction]:
         """Cheap SQL pre-filter for retroactive merchant corrections: a
         case-insensitive `ilike` wildcard on `first_token`, bounded by
@@ -172,11 +189,14 @@ class TransactionRepository(BaseRepository[Transaction]):
         )
         return result.all()
 
-    async def daily_category_spend(self, since: datetime):
+    async def daily_category_spend(self, since: datetime, exclude_ids: set[int] | None = None):
         """(day, category_name, total) expense rows on/after `since`, in base-
         currency converted amounts. `category_name` is None for uncategorized
-        rows (outer join keeps them instead of dropping them)."""
-        result = await self.db.execute(
+        rows (outer join keeps them instead of dropping them). `exclude_ids`,
+        when given a non-empty set, drops those transaction ids from the
+        aggregate -- used by the Analysis page's "exclude recurring large
+        expenses" toggle."""
+        query = (
             select(
                 func.date(Transaction.date).label("day"),
                 Category.name.label("category_name"),
@@ -188,15 +208,17 @@ class TransactionRepository(BaseRepository[Transaction]):
                 Transaction.is_duplicate == False,  # noqa: E712
                 Transaction.date >= since,
             )
-            .group_by("day", "category_name")
-            .order_by("day")
         )
+        if exclude_ids:
+            query = query.where(Transaction.id.notin_(exclude_ids))
+        result = await self.db.execute(query.group_by("day", "category_name").order_by("day"))
         return result.all()
 
-    async def category_distribution(self):
+    async def category_distribution(self, exclude_ids: set[int] | None = None):
         """(group_name, category_name, total, count) expense rows, largest
-        total first is left to the caller -- this returns unsorted groups."""
-        result = await self.db.execute(
+        total first is left to the caller -- this returns unsorted groups.
+        See `daily_category_spend` for `exclude_ids`."""
+        query = (
             select(
                 CategoryGroup.name.label("group_name"),
                 Category.name.label("category_name"),
@@ -209,35 +231,37 @@ class TransactionRepository(BaseRepository[Transaction]):
                 Transaction.is_expense == True,  # noqa: E712
                 Transaction.is_duplicate == False,  # noqa: E712
             )
-            .group_by("group_name", "category_name")
         )
+        if exclude_ids:
+            query = query.where(Transaction.id.notin_(exclude_ids))
+        result = await self.db.execute(query.group_by("group_name", "category_name"))
         return result.all()
 
-    async def currency_breakdown(self):
+    async def currency_breakdown(self, exclude_ids: set[int] | None = None):
         """(original_currency, original_total, converted_total, count) rows,
         pre-conversion sign preserved (not abs'd), across all non-duplicate
-        transactions."""
-        result = await self.db.execute(
-            select(
-                Transaction.original_currency,
-                func.sum(Transaction.original_amount).label("original_total"),
-                func.sum(Transaction.converted_amount).label("converted_total"),
-                func.count().label("count"),
-            )
-            .where(Transaction.is_duplicate == False)  # noqa: E712
-            .group_by(Transaction.original_currency)
-        )
+        transactions. See `daily_category_spend` for `exclude_ids`."""
+        query = select(
+            Transaction.original_currency,
+            func.sum(Transaction.original_amount).label("original_total"),
+            func.sum(Transaction.converted_amount).label("converted_total"),
+            func.count().label("count"),
+        ).where(Transaction.is_duplicate == False)  # noqa: E712
+        if exclude_ids:
+            query = query.where(Transaction.id.notin_(exclude_ids))
+        result = await self.db.execute(query.group_by(Transaction.original_currency))
         return result.all()
 
-    async def bank_breakdown(self) -> list[dict]:
+    async def bank_breakdown(self, exclude_ids: set[int] | None = None) -> list[dict]:
         """(bank, count, total) rows across all non-duplicate transactions,
         total is the sum of absolute converted amounts (volume moved through
         that source, income and expense alike). Aggregated in Python rather
         than `func.sum(func.abs(...))`: SQLite loses the Numeric column's
         Decimal typing through `func.abs()`, returning e.g. "30" instead of
-        "30.00" and breaking the app's string-money convention."""
+        "30.00" and breaking the app's string-money convention. See
+        `daily_category_spend` for `exclude_ids`."""
         result = await self.db.execute(
-            select(Transaction.bank, Transaction.converted_amount).where(
+            select(Transaction.id, Transaction.bank, Transaction.converted_amount).where(
                 Transaction.is_duplicate == False  # noqa: E712
             )
         )
@@ -245,6 +269,8 @@ class TransactionRepository(BaseRepository[Transaction]):
 
         totals: dict[str, dict] = {}
         for row in rows:
+            if exclude_ids and row.id in exclude_ids:
+                continue
             bucket = totals.setdefault(row.bank, {"count": 0, "total": Decimal("0")})
             bucket["count"] += 1
             bucket["total"] += abs(row.converted_amount or Decimal("0"))
@@ -253,6 +279,31 @@ class TransactionRepository(BaseRepository[Transaction]):
             {"bank": bank, "count": bucket["count"], "total": bucket["total"]}
             for bank, bucket in totals.items()
         ]
+
+    async def list_expense_rows_for_recurring(self):
+        """(id, description, date, converted_amount, category_name,
+        group_name) rows for every non-duplicate expense transaction with a
+        converted amount -- raw material for recurring-merchant detection
+        (see app.services.recurring), which needs individual transactions
+        rather than a pre-aggregated total."""
+        result = await self.db.execute(
+            select(
+                Transaction.id,
+                Transaction.description,
+                Transaction.date,
+                Transaction.converted_amount,
+                Category.name.label("category_name"),
+                CategoryGroup.name.label("group_name"),
+            )
+            .join(Transaction.category, isouter=True)
+            .join(Category.group, isouter=True)
+            .where(
+                Transaction.is_expense == True,  # noqa: E712
+                Transaction.is_duplicate == False,  # noqa: E712
+                Transaction.converted_amount.isnot(None),
+            )
+        )
+        return result.all()
 
     async def duplicate_groups(self) -> list[dict]:
         """Groups of non-duplicate transactions sharing (day, original_amount,
