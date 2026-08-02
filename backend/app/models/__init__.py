@@ -5,6 +5,7 @@ from app.models.transaction import (
     CategoryCorrection,
     CategoryGroup,
     ImportBatch,
+    InternalTransferMatch,
     Transaction,
     UploadLog,
     UserSettings,
@@ -20,4 +21,5 @@ __all__ = [
     "BudgetTarget",
     "UserSettings",
     "UploadLog",
+    "InternalTransferMatch",
 ]

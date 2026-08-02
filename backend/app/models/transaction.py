@@ -126,6 +126,43 @@ class CategoryCorrection(Base):
     category: Mapped["Category | None"] = relationship(foreign_keys=[category_id])
 
 
+class InternalTransferMatch(Base):
+    """A detected pair of transactions that are two legs of the same
+    inter-account movement between the user's own bank accounts.
+
+    Plain Integer transaction-id columns with NO ForeignKey:
+    `ImportBatchRepository.delete_with_transactions` and
+    `POST /api/admin/reset` bulk-DELETE transactions, so a real FK here
+    would either block that delete or dangle. Same reasoning and shape as
+    `CategoryCorrection.source_transaction_id` (D-02).
+
+    No derived monetary value (e.g. the transfer fee) is persisted here --
+    it is computed at read time from the two legs so it can never drift
+    from them.
+
+    `status` is a tombstone, not a soft-delete convenience: "rejected" rows
+    are kept forever so a re-scan never resurrects a pair the user already
+    dismissed (D-06). The uniqueness constraint below is on the PAIR, not
+    on the individual columns, so a transaction rejected in one pairing can
+    still legitimately match a different transaction later.
+    """
+
+    __tablename__ = "internal_transfer_matches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    outgoing_transaction_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    incoming_transaction_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    confidence: Mapped[str] = mapped_column(String(10), nullable=False)  # high | medium | low
+    status: Mapped[str] = mapped_column(String(10), nullable=False)  # confirmed | suggested | rejected
+    detected_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "outgoing_transaction_id", "incoming_transaction_id", name="uq_transfer_pair"
+        ),
+    )
+
+
 class UploadLog(Base):
     """Append-only audit trail of every CSV upload attempt, success or
     failure. Unlike ImportBatch (deleted on undo/reset), this table has no FK
