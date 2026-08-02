@@ -34,6 +34,7 @@ vi.mock("recharts", () => {
         ))}
       </div>
     ),
+    ReferenceLine: ({ y }: { y: number }) => <div data-testid="ref-line" data-y={String(y)} />,
   };
 });
 
@@ -45,7 +46,12 @@ const DATA: DailyPoint[] = [
 
 function renderChart(
   onDayDrillDown?: (date: string) => void,
-  onRangeSelect?: (range: { from: string; to: string; count: number } | null) => void
+  onRangeSelect?: (range: { from: string; to: string; count: number } | null) => void,
+  extra?: {
+    onSelectionChange?: (selection: { from: string; to: string; count: number } | null) => void;
+    averageLine?: number | null;
+    medianLine?: number | null;
+  }
 ) {
   return render(
     <DailySpendChart
@@ -55,6 +61,9 @@ function renderChart(
       mode="aggregate"
       onDayDrillDown={onDayDrillDown}
       onRangeSelect={onRangeSelect}
+      onSelectionChange={extra?.onSelectionChange}
+      averageLine={extra?.averageLine}
+      medianLine={extra?.medianLine}
     />
   );
 }
@@ -174,5 +183,68 @@ describe("DailySpendChart", () => {
     expect(onDayDrillDown).toHaveBeenCalledTimes(1);
     expect(onDayDrillDown).toHaveBeenCalledWith("2026-07-30");
     expect(onRangeSelect).toHaveBeenLastCalledWith(null);
+  });
+
+  it("renders no reference line when both line props are omitted", () => {
+    renderChart();
+
+    expect(screen.queryAllByTestId("ref-line")).toHaveLength(0);
+  });
+
+  it("renders two reference lines with the expected y-values when both are supplied", () => {
+    renderChart(undefined, undefined, { averageLine: 20, medianLine: 15 });
+
+    const lines = screen.getAllByTestId("ref-line");
+    expect(lines).toHaveLength(2);
+    expect(lines.map((l) => l.getAttribute("data-y"))).toEqual(["20", "15"]);
+  });
+
+  it("renders one reference line when only one line prop is supplied", () => {
+    renderChart(undefined, undefined, { averageLine: 20 });
+
+    expect(screen.getAllByTestId("ref-line")).toHaveLength(1);
+  });
+
+  it("fires onSelectionChange with the armed single day on the first click", () => {
+    const onSelectionChange = vi.fn();
+    renderChart(undefined, undefined, { onSelectionChange });
+
+    fireEvent.click(screen.getByTestId("bar-total-0"));
+
+    expect(onSelectionChange).toHaveBeenLastCalledWith({
+      from: "2026-07-29",
+      to: "2026-07-29",
+      count: 1,
+    });
+  });
+
+  it("fires onSelectionChange with the full normalized range on the completing click", () => {
+    const onSelectionChange = vi.fn();
+    renderChart(undefined, undefined, { onSelectionChange });
+
+    fireEvent.click(screen.getByTestId("bar-total-0"));
+    fireEvent.click(screen.getByTestId("bar-total-2"));
+
+    expect(onSelectionChange).toHaveBeenLastCalledWith({
+      from: "2026-07-29",
+      to: "2026-07-31",
+      count: 3,
+    });
+  });
+
+  it("fires onSelectionChange with null on a slow same-index cancel", () => {
+    const onSelectionChange = vi.fn();
+    let clock = 1_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
+
+    renderChart(undefined, undefined, { onSelectionChange });
+
+    fireEvent.click(screen.getByTestId("bar-total-0"));
+    clock += 1000; // well past DOUBLE_CLICK_MS
+    fireEvent.click(screen.getByTestId("bar-total-0"));
+
+    expect(onSelectionChange).toHaveBeenLastCalledWith(null);
+
+    nowSpy.mockRestore();
   });
 });

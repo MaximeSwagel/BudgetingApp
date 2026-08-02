@@ -5,6 +5,7 @@ import {
   CartesianGrid,
   Cell,
   Legend,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -33,6 +34,26 @@ export interface DailySpendChartProps {
    * inclusive day span) once a second bar completes the range.
    */
   onRangeSelect?: (range: { from: string; to: string; count: number } | null) => void;
+  /**
+   * Fired on EVERY selection-state change, including the armed single day
+   * (`from === to`, `count === 1`) and `null` on cancel/re-arm-clear/
+   * drill-down -- unlike `onRangeSelect`, which stays the completed
+   * multi-day-range signal that drives the Transactions CTA navigation and
+   * whose existing semantics are unchanged. This prop exists purely so
+   * callers can render read-only summary stats for any selection state,
+   * including a single armed day that `onRangeSelect` never reports.
+   */
+  onSelectionChange?: (selection: { from: string; to: string; count: number } | null) => void;
+  /**
+   * When a finite number is supplied, draws a dashed horizontal reference
+   * line at that y-value using `AVG_LINE_COLOR`. `null`/`undefined`/
+   * non-finite values render nothing. Renders in both `aggregate` and
+   * `byCategory` mode -- in stacked mode the bar height is still the day
+   * total, so the comparison against the line still holds.
+   */
+  averageLine?: number | null;
+  /** Same contract as `averageLine`, drawn with `MEDIAN_LINE_COLOR`. */
+  medianLine?: number | null;
 }
 
 // Two clicks on the same bar index within this window count as a
@@ -63,6 +84,14 @@ const AXIS_COLOR = "#898781"; // muted ink (palette.md "Muted (axis/labels)")
 const GRID_COLOR = "#e1e0d9"; // hairline gridline
 const SURFACE_COLOR = "#ffffff"; // card surface -- used as the stacked-segment gap
 
+// Reference-line colors reuse validated categorical palette slots from
+// SERIES_COLORS above (slot 2 orange / slot 7 violet) rather than new
+// hexes. Exported so AnalysisPage's stat-chip dots import these same
+// constants -- the chip color and the drawn line color can never drift
+// apart because they are the same value.
+export const AVG_LINE_COLOR = SERIES_COLORS[1]; // "#eb6834" -- slot 2
+export const MEDIAN_LINE_COLOR = SERIES_COLORS[6]; // "#4a3aa7" -- slot 7
+
 function formatDateTick(value: string): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
@@ -87,6 +116,9 @@ export default function DailySpendChart({
   mode,
   onDayDrillDown,
   onRangeSelect,
+  onSelectionChange,
+  averageLine,
+  medianLine,
 }: DailySpendChartProps) {
   const rows = data.map((d) => {
     const row: Record<string, number | string> = { date: d.date, total: parseFloat(d.total) };
@@ -101,9 +133,10 @@ export default function DailySpendChart({
 
   // Stale-window guard: reset the internal selection whenever the time-range
   // preset swaps the dataset, so armed indices can never point at dates from
-  // a previous window. Deliberately does NOT call onRangeSelect -- the page
-  // already nulls its own range on the same trigger, and doing it here too
-  // would risk a render loop.
+  // a previous window. Deliberately does NOT call onRangeSelect or
+  // onSelectionChange -- the page already nulls its own range/selection
+  // state on the same trigger (its `useEffect([days])`), and calling either
+  // callback here too would risk a render loop.
   useEffect(() => {
     setSelection(null);
   }, [data]);
@@ -117,6 +150,7 @@ export default function DailySpendChart({
       lastClickRef.current = null;
       setSelection(null);
       onRangeSelect?.(null);
+      onSelectionChange?.(null);
       const date = rows[index]?.date;
       if (typeof date === "string") onDayDrillDown?.(date);
       return;
@@ -127,6 +161,12 @@ export default function DailySpendChart({
       // (a) no selection -> arm.
       setSelection({ start: index, end: null });
       onRangeSelect?.(null);
+      const date = rows[index]?.date;
+      if (typeof date === "string") {
+        onSelectionChange?.({ from: date, to: date, count: 1 });
+      } else {
+        onSelectionChange?.(null);
+      }
       return;
     }
 
@@ -135,6 +175,7 @@ export default function DailySpendChart({
         // (b) armed and SAME index clicked slowly -> explicit cancel.
         setSelection(null);
         onRangeSelect?.(null);
+        onSelectionChange?.(null);
         return;
       }
       // (c) armed and DIFFERENT index -> complete, chronologically normalized.
@@ -145,16 +186,24 @@ export default function DailySpendChart({
       if (typeof from !== "string" || typeof to !== "string") {
         setSelection(null);
         onRangeSelect?.(null);
+        onSelectionChange?.(null);
         return;
       }
       setSelection({ start: lo, end: hi });
       onRangeSelect?.({ from, to, count: hi - lo + 1 });
+      onSelectionChange?.({ from, to, count: hi - lo + 1 });
       return;
     }
 
     // (d) already complete -> re-arm at the newly clicked bar.
     setSelection({ start: index, end: null });
     onRangeSelect?.(null);
+    const date = rows[index]?.date;
+    if (typeof date === "string") {
+      onSelectionChange?.({ from: date, to: date, count: 1 });
+    } else {
+      onSelectionChange?.(null);
+    }
   };
 
   const selLo = selection === null ? null : Math.min(selection.start, selection.end ?? selection.start);
@@ -233,6 +282,22 @@ export default function DailySpendChart({
                 </Bar>
               ))}
             </>
+          )}
+          {Number.isFinite(averageLine) && (
+            <ReferenceLine
+              y={averageLine as number}
+              stroke={AVG_LINE_COLOR}
+              strokeDasharray="6 4"
+              strokeWidth={1.5}
+            />
+          )}
+          {Number.isFinite(medianLine) && (
+            <ReferenceLine
+              y={medianLine as number}
+              stroke={MEDIAN_LINE_COLOR}
+              strokeDasharray="2 4"
+              strokeWidth={1.5}
+            />
           )}
         </BarChart>
       </ResponsiveContainer>
