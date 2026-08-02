@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from decimal import Decimal
 
@@ -19,8 +20,10 @@ from app.repositories import (
 from app.services.categorizer import categorize_transactions, resolve_category_id
 from app.services.corrections import categorize_with_corrections, learned_categories
 from app.services.currency import convert_amount
+from app.services.transfer_scan import resolve_transfer_fee_category_id, scan_and_persist
 
 router = APIRouter(prefix="/api/upload", tags=["upload"])
+logger = logging.getLogger(__name__)
 
 
 @router.delete("/batches/{batch_id}")
@@ -145,6 +148,12 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
     base_currency = settings.base_currency
     imported_count = 0
     duplicates = 0
+    fees_recorded = 0
+
+    # Resolved once per upload (not once per row) -- a missing category is a
+    # soft failure, so a fee row lands uncategorized rather than the whole
+    # upload failing (D-08/D-09).
+    fee_category_id = await resolve_transfer_fee_category_id(group_repo, category_repo)
 
     for txn_data, cat_data in zip(parsed_transactions, categories):
         # A failed/skipped categorization resolves to None and stays NULL
@@ -197,7 +206,61 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
         )
         imported_count += 1
 
-    batch.transaction_count = imported_count
+        # Synthesize a separate fee transaction when the parser extracted a
+        # non-zero fee (currently only the Revolut parsers emit this field).
+        # Read explicitly with `!= Decimal("0")`, never truthiness, so a
+        # bug like D-14's zero-amount falsiness issue can't be copied here.
+        fee = txn_data.get("fee")
+        if fee is not None and fee != Decimal("0"):
+            fee_amount = -abs(fee)
+            # Em-dash suffix (matching the description style already used
+            # elsewhere in this codebase) is what keeps this synthesized row
+            # from colliding with uq_transaction_dedup on re-upload.
+            fee_description = f"{txn_data['description']} — Transfer fee"
+
+            if orig_currency != base_currency:
+                fee_converted, fee_rate = await convert_amount(
+                    abs(fee_amount), orig_currency, base_currency, date_str
+                )
+                fee_converted = -fee_converted
+            else:
+                fee_converted = fee_amount
+                fee_rate = Decimal("1")
+
+            fee_is_dup = (
+                await txn_repo.find_duplicate(
+                    date=txn_data["date"],
+                    amount=fee_amount,
+                    currency=orig_currency,
+                    bank=txn_data["bank"],
+                    description=fee_description,
+                )
+                is not None
+            )
+
+            if not fee_is_dup:
+                txn_repo.add(
+                    Transaction(
+                        date=txn_data["date"],
+                        description=fee_description,
+                        original_amount=fee_amount,
+                        original_currency=orig_currency,
+                        converted_amount=fee_converted,
+                        exchange_rate=fee_rate,
+                        base_currency=base_currency,
+                        bank=txn_data["bank"],
+                        category_id=fee_category_id,
+                        import_batch_id=batch.id,
+                        is_duplicate=False,
+                        is_expense=True,
+                    )
+                )
+                fees_recorded += 1
+
+    # Fee rows count toward the batch total so undo-import removes them too,
+    # while the "imported" response key below stays principal-rows-only --
+    # existing tests assert on that key's meaning.
+    batch.transaction_count = imported_count + fees_recorded
 
     # rows_failed stays 0: the parsers silently drop malformed rows today and
     # don't surface a per-row failure count (see SUMMARY for this limitation).
@@ -218,6 +281,16 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
     # Same session/transaction as the batch + imported transactions above.
     await batch_repo.commit()
 
+    # Run internal-transfer detection at the end of every successful upload
+    # (D-07) -- wrapped so a detection failure logs and returns zero rather
+    # than failing an otherwise successful import.
+    try:
+        scan_summary = await scan_and_persist(db)
+        transfers_detected = scan_summary["created"]
+    except Exception as e:
+        logger.error(f"Transfer detection after upload failed: {e}")
+        transfers_detected = 0
+
     return {
         "format_detected": format_type,
         "bank": bank,
@@ -225,4 +298,6 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
         "imported": imported_count,
         "duplicates_skipped": duplicates,
         "batch_id": batch.id,
+        "fees_recorded": fees_recorded,
+        "transfers_detected": transfers_detected,
     }

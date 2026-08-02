@@ -1,7 +1,7 @@
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import joinedload
 
 from app.models import Category, CategoryGroup, Transaction
@@ -303,6 +303,36 @@ class TransactionRepository(BaseRepository[Transaction]):
                 Transaction.converted_amount.isnot(None),
             )
         )
+        return result.all()
+
+    async def list_transfer_candidates(self, exclude_category_id: int | None = None):
+        """(id, date, description, original_amount, original_currency,
+        converted_amount, bank, category_id) rows -- raw material for
+        internal-transfer detection (see app.services.transfers /
+        app.services.transfer_scan). `exclude_category_id`, when given,
+        drops rows already categorized under it so a synthesized Transfer
+        Fees row can never itself become a transfer leg."""
+        query = select(
+            Transaction.id,
+            Transaction.date,
+            Transaction.description,
+            Transaction.original_amount,
+            Transaction.original_currency,
+            Transaction.converted_amount,
+            Transaction.bank,
+            Transaction.category_id,
+        ).where(
+            Transaction.is_duplicate == False,  # noqa: E712
+            Transaction.converted_amount.isnot(None),
+        )
+        if exclude_category_id is not None:
+            query = query.where(
+                or_(
+                    Transaction.category_id.is_(None),
+                    Transaction.category_id != exclude_category_id,
+                )
+            )
+        result = await self.db.execute(query)
         return result.all()
 
     async def duplicate_groups(self) -> list[dict]:

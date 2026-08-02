@@ -50,7 +50,7 @@ SEED_CATEGORIES = {
         "Laundry & Dry Cleaning", "Cell Phone",
     ],
     "Insurance, Tax & Bank Fees": [
-        "Renters Insurance", "Other Insurance", "Income Tax", "Bank Fees",
+        "Renters Insurance", "Other Insurance", "Income Tax", "Bank Fees", "Transfer Fees",
     ],
     "Health Care": ["Health Insurance", "Dental Insurance", "Doctor & Dentist"],
     "Discretionary": [
@@ -60,21 +60,41 @@ SEED_CATEGORIES = {
 }
 
 
+async def ensure_seed_categories(session) -> None:
+    """Idempotent, additive category-taxonomy seeding.
+
+    Unlike the one-shot `if first() is None` seeding this replaces, this
+    runs on every startup and creates only what is missing -- it never
+    updates, reorders, or deletes an existing `CategoryGroup`/`Category`
+    row. This is what lets a NEW entry added to `SEED_CATEGORIES` (e.g.
+    "Transfer Fees") appear on the user's existing, non-empty database
+    without disturbing any manually added category or reordering (D-08).
+    """
+    for order, (group_name, cats) in enumerate(SEED_CATEGORIES.items()):
+        result = await session.execute(select(CategoryGroup).where(CategoryGroup.name == group_name))
+        group = result.scalar_one_or_none()
+        if group is None:
+            group = CategoryGroup(name=group_name, display_order=order)
+            session.add(group)
+            await session.flush()
+
+        for cat_order, cat_name in enumerate(cats):
+            cat_result = await session.execute(
+                select(Category).where(Category.name == cat_name, Category.group_id == group.id)
+            )
+            if cat_result.scalar_one_or_none() is None:
+                session.add(Category(name=cat_name, group_id=group.id, display_order=cat_order))
+
+    await session.commit()
+
+
 @app.on_event("startup")
 async def startup():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
     async with async_session() as session:
-        result = await session.execute(select(CategoryGroup))
-        if result.scalars().first() is None:
-            for order, (group_name, cats) in enumerate(SEED_CATEGORIES.items()):
-                group = CategoryGroup(name=group_name, display_order=order)
-                session.add(group)
-                await session.flush()
-                for cat_order, cat_name in enumerate(cats):
-                    session.add(Category(name=cat_name, group_id=group.id, display_order=cat_order))
-            await session.commit()
+        await ensure_seed_categories(session)
 
         # Apply any persisted AI settings overrides (provider/model choice) so
         # they take effect on boot, not just after the next PUT /api/settings/ai.

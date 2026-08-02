@@ -15,7 +15,7 @@ CATEGORY_HIERARCHY = {
         "Laundry & Dry Cleaning", "Cell Phone",
     ],
     "Insurance, Tax & Bank Fees": [
-        "Renters Insurance", "Other Insurance", "Income Tax", "Bank Fees",
+        "Renters Insurance", "Other Insurance", "Income Tax", "Bank Fees", "Transfer Fees",
     ],
     "Health Care": ["Health Insurance", "Dental Insurance", "Doctor & Dentist"],
     "Discretionary": [
