@@ -17,6 +17,7 @@ from app.routers import (
     income,
     settings as settings_router,
     transactions,
+    transfers,
     upload,
 )
 
@@ -42,6 +43,7 @@ app.include_router(income.router)
 app.include_router(admin.router)
 app.include_router(settings_router.router)
 app.include_router(corrections.router)
+app.include_router(transfers.router)
 
 SEED_CATEGORIES = {
     "Home Expenses": ["Rent", "Utilities: Gas, Electric, Water", "Internet, TV"],

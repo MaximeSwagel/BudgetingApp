@@ -107,6 +107,22 @@ class TransactionRepository(BaseRepository[Transaction]):
 
         return transactions, total
 
+    async def list_by_ids(self, ids: set[int]) -> list[Transaction]:
+        """Transactions for a set of ids, eagerly loading category+group --
+        touching `txn.category.group.name` on a lazily-loaded async
+        relationship raises MissingGreenlet (see
+        CategoryCorrectionRepository.list_all for the same convention).
+        Used by the Internal Transfers router to fetch both legs of every
+        match in one query rather than N+1 `get()` calls."""
+        if not ids:
+            return []
+        result = await self.db.execute(
+            select(Transaction)
+            .options(joinedload(Transaction.category).joinedload(Category.group))
+            .where(Transaction.id.in_(ids))
+        )
+        return list(result.scalars().unique().all())
+
     async def find_duplicate(
         self,
         *,
