@@ -35,6 +35,26 @@ interface BankRow {
   total: string;
 }
 
+interface RecurringOccurrence {
+  month: string;
+  amount: string;
+}
+
+interface RecurringGroup {
+  merchant_key: string;
+  description: string;
+  category: string | null;
+  group: string | null;
+  occurrences: RecurringOccurrence[];
+  occurrence_count: number;
+  latest_amount: string;
+  baseline_amount: string;
+  pct_change: string | null;
+  status: "stable" | "increased" | "decreased";
+  overdue: boolean;
+  last_seen: string | null;
+}
+
 interface AnalysisData {
   base_currency: string;
   days: number;
@@ -42,8 +62,24 @@ interface AnalysisData {
   categories: CategoryRow[];
   uncategorized_count: number;
   duplicate_groups: DuplicateGroup[];
+  recurring: RecurringGroup[];
+  recurring_threshold: string;
+  exclude_recurring: boolean;
   by_currency: CurrencyRow[];
   by_bank: BankRow[];
+}
+
+const RECURRING_STATUS_LABEL: Record<RecurringGroup["status"], string> = {
+  stable: "Stable",
+  increased: "Increased",
+  decreased: "Decreased",
+};
+
+function formatPctChange(pctChange: string | null): string {
+  if (!pctChange) return "-";
+  const pct = parseFloat(pctChange) * 100;
+  const sign = pct > 0 ? "+" : "";
+  return `${sign}${pct.toFixed(1)}%`;
 }
 
 // The dataviz palette's categorical series validate CVD-safe adjacency up to
@@ -122,13 +158,14 @@ export default function AnalysisPage() {
   const [showAvg, setShowAvg] = useState(false);
   const [showMedian, setShowMedian] = useState(false);
   const [selection, setSelection] = useState<{ from: string; to: string; count: number } | null>(null);
+  const [excludeRecurring, setExcludeRecurring] = useState(false);
   const navigate = useNavigate();
 
   useEffect(() => {
     setRange(null);
     setSelection(null);
-    getAnalysis(days).then(setData);
-  }, [days]);
+    getAnalysis(days, excludeRecurring).then(setData);
+  }, [days, excludeRecurring]);
 
   const chart = useMemo(
     () => (data ? buildChartSeries(data.daily) : { categories: [] as string[], daily: [] as DailyPoint[] }),
@@ -157,6 +194,7 @@ export default function AnalysisPage() {
 
   const currency = data.base_currency;
   const maxCategoryTotal = Math.max(...data.categories.map((c) => parseFloat(c.total)), 1);
+  const changedRecurring = data.recurring.filter((g) => g.status !== "stable" || g.overdue);
 
   return (
     <div className="analysis">
@@ -172,6 +210,16 @@ export default function AnalysisPage() {
           <Link to="/transactions?uncategorized=1" className="btn btn-primary">
             Review now
           </Link>
+        </div>
+      )}
+
+      {changedRecurring.length > 0 && (
+        <div className="dash-callout dash-callout-warn" data-testid="recurring-warning-callout">
+          <span>
+            <strong>{changedRecurring.length}</strong> recurring large expense
+            {changedRecurring.length === 1 ? "" : "s"} changed or went quiet — see Recurring large
+            expenses below.
+          </span>
         </div>
       )}
 
@@ -304,6 +352,69 @@ export default function AnalysisPage() {
               </Link>
             )}
           </>
+        )}
+      </Card>
+
+      <Card>
+        <div className="analysis-chart-header">
+          <h3 className="dash-chart-title">Recurring large expenses</h3>
+          {data.recurring.length > 0 && (
+            <Button
+              variant={excludeRecurring ? "primary" : "secondary"}
+              aria-pressed={excludeRecurring}
+              onClick={() => setExcludeRecurring((v) => !v)}
+              title="Remove these transactions from the daily spend, category, currency and bank breakdowns on this page"
+            >
+              {excludeRecurring ? "Excluded from charts above" : "Exclude from charts above"}
+            </Button>
+          )}
+        </div>
+        {data.recurring.length === 0 ? (
+          <p className="dash-muted">
+            No recurring large expenses detected yet — a merchant needs to recur across at least 3
+            months at or above {formatMonthValue(data.recurring_threshold)} {currency} to show up
+            here.
+          </p>
+        ) : (
+          <TableContainer>
+            <table>
+              <thead>
+                <tr>
+                  <th>Merchant</th>
+                  <th>Category</th>
+                  <th>Latest</th>
+                  <th>Usual</th>
+                  <th>Change</th>
+                  <th>Status</th>
+                  <th>Last seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.recurring.map((g) => (
+                  <tr key={g.merchant_key}>
+                    <td title={`${g.occurrence_count} occurrences`}>{g.description}</td>
+                    <td>{g.category ?? "Uncategorized"}</td>
+                    <td>
+                      {formatMonthValue(g.latest_amount)} {currency}
+                    </td>
+                    <td>
+                      {formatMonthValue(g.baseline_amount)} {currency}
+                    </td>
+                    <td className={g.status === "increased" ? "amount-negative" : g.status === "decreased" ? "amount-positive" : undefined}>
+                      {formatPctChange(g.pct_change)}
+                    </td>
+                    <td>
+                      <span className={`recurring-badge recurring-badge-${g.status}`}>
+                        {RECURRING_STATUS_LABEL[g.status]}
+                      </span>
+                      {g.overdue && <span className="recurring-badge recurring-badge-overdue">Overdue</span>}
+                    </td>
+                    <td>{g.last_seen ? new Date(g.last_seen).toLocaleDateString("en-GB") : "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableContainer>
         )}
       </Card>
 

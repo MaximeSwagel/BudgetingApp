@@ -61,6 +61,9 @@ const BASE_DATA = {
   duplicate_groups: [
     { date: "2026-07-30", amount: "-15.00", description: "Tesco", banks: ["Revolut", "CA"], count: 2 },
   ],
+  recurring: [] as unknown[],
+  recurring_threshold: "100",
+  exclude_recurring: false,
   by_currency: [
     { currency: "ILS", original_total: "-35.00", converted_total: "-35.00", count: 2 },
     { currency: "EUR", original_total: "-15.00", converted_total: "-58.50", count: 1 },
@@ -168,7 +171,7 @@ describe("AnalysisPage", () => {
 
     renderPage();
 
-    await waitFor(() => expect(api.getAnalysis).toHaveBeenCalledWith(90));
+    await waitFor(() => expect(api.getAnalysis).toHaveBeenCalledWith(90, false));
   });
 
   it("switches the range window when a preset button is clicked", async () => {
@@ -179,7 +182,7 @@ describe("AnalysisPage", () => {
     await waitFor(() => expect(screen.getByText("30d")).toBeInTheDocument());
     await userEvent.click(screen.getByText("30d"));
 
-    await waitFor(() => expect(api.getAnalysis).toHaveBeenCalledWith(30));
+    await waitFor(() => expect(api.getAnalysis).toHaveBeenCalledWith(30, false));
     expect(screen.getByText("30d")).toHaveClass("btn-primary");
     expect(screen.getByText("90d")).toHaveClass("btn-secondary");
   });
@@ -280,5 +283,117 @@ describe("AnalysisPage", () => {
     await waitFor(() => expect(screen.getByText("Selection")).toBeInTheDocument());
     const summary = screen.getByText("Selection").closest(".analysis-selection-summary") as HTMLElement;
     expect(within(summary).getByText(/10/)).toBeInTheDocument();
+  });
+
+  it("shows the empty state when no recurring large expenses are detected", async () => {
+    vi.mocked(api.getAnalysis).mockResolvedValue(BASE_DATA);
+
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText(/No recurring large expenses detected yet/)).toBeInTheDocument()
+    );
+  });
+
+  it("renders a recurring group row with its status badge and does not show the warning callout when stable", async () => {
+    const recurringData = {
+      ...BASE_DATA,
+      recurring: [
+        {
+          merchant_key: "landlord rent co",
+          description: "Landlord Rent Co",
+          category: "Rent",
+          group: "Housing",
+          occurrences: [
+            { month: "2026-05", amount: "1000.00" },
+            { month: "2026-06", amount: "1000.00" },
+            { month: "2026-07", amount: "1000.00" },
+          ],
+          occurrence_count: 3,
+          latest_amount: "1000.00",
+          baseline_amount: "1000.00",
+          pct_change: "0",
+          status: "stable",
+          overdue: false,
+          last_seen: "2026-07-01",
+        },
+      ],
+    };
+    vi.mocked(api.getAnalysis).mockResolvedValue(recurringData);
+
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Landlord Rent Co")).toBeInTheDocument());
+    expect(screen.getByText("Stable")).toBeInTheDocument();
+    expect(screen.queryByText(/changed or went quiet/)).not.toBeInTheDocument();
+  });
+
+  it("shows the warning callout and an Increased badge when a recurring expense grew beyond tolerance", async () => {
+    const recurringData = {
+      ...BASE_DATA,
+      recurring: [
+        {
+          merchant_key: "landlord rent co",
+          description: "Landlord Rent Co",
+          category: "Rent",
+          group: "Housing",
+          occurrences: [
+            { month: "2026-05", amount: "1000.00" },
+            { month: "2026-06", amount: "1000.00" },
+            { month: "2026-07", amount: "1300.00" },
+          ],
+          occurrence_count: 3,
+          latest_amount: "1300.00",
+          baseline_amount: "1000.00",
+          pct_change: "0.3",
+          status: "increased",
+          overdue: false,
+          last_seen: "2026-07-01",
+        },
+      ],
+    };
+    vi.mocked(api.getAnalysis).mockResolvedValue(recurringData);
+
+    renderPage();
+
+    const callout = await screen.findByTestId("recurring-warning-callout");
+    expect(callout).toHaveTextContent("1 recurring large expense changed or went quiet");
+    expect(screen.getByText("Increased")).toBeInTheDocument();
+    expect(screen.getByText("+30.0%")).toBeInTheDocument();
+  });
+
+  it("re-fetches with exclude_recurring when the toggle is clicked", async () => {
+    const recurringData = {
+      ...BASE_DATA,
+      recurring: [
+        {
+          merchant_key: "landlord rent co",
+          description: "Landlord Rent Co",
+          category: "Rent",
+          group: "Housing",
+          occurrences: [
+            { month: "2026-05", amount: "1000.00" },
+            { month: "2026-06", amount: "1000.00" },
+            { month: "2026-07", amount: "1000.00" },
+          ],
+          occurrence_count: 3,
+          latest_amount: "1000.00",
+          baseline_amount: "1000.00",
+          pct_change: "0",
+          status: "stable",
+          overdue: false,
+          last_seen: "2026-07-01",
+        },
+      ],
+    };
+    vi.mocked(api.getAnalysis).mockResolvedValue(recurringData);
+
+    renderPage();
+
+    const toggle = await screen.findByText("Exclude from charts above");
+    await userEvent.click(toggle);
+
+    await waitFor(() => expect(api.getAnalysis).toHaveBeenLastCalledWith(90, true));
+    expect(await screen.findByText("Excluded from charts above")).toBeInTheDocument();
   });
 });

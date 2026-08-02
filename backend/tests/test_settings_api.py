@@ -55,3 +55,32 @@ async def test_put_ai_settings_round_trip(client, monkeypatch):
 async def test_put_ai_settings_rejects_invalid_provider(client):
     resp = await client.put("/api/settings/ai", json={"ai_provider": "not-a-real-provider"})
     assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_get_recurring_settings_defaults_to_config(client):
+    resp = await client.get("/api/settings/recurring")
+    assert resp.status_code == 200
+    assert resp.json()["recurring_large_threshold"] == str(settings.recurring_large_threshold)
+
+
+@pytest.mark.asyncio
+async def test_put_recurring_settings_round_trip(client):
+    resp = await client.put("/api/settings/recurring", json={"recurring_large_threshold": "250"})
+    assert resp.status_code == 200
+    assert resp.json()["recurring_large_threshold"] == "250"
+
+    body = (await client.get("/api/settings/recurring")).json()
+    assert body["recurring_large_threshold"] == "250"
+
+
+@pytest.mark.asyncio
+async def test_put_recurring_settings_rejects_non_numeric(client):
+    resp = await client.put("/api/settings/recurring", json={"recurring_large_threshold": "lots"})
+    assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_put_recurring_settings_rejects_non_positive(client):
+    resp = await client.put("/api/settings/recurring", json={"recurring_large_threshold": "0"})
+    assert resp.status_code == 400

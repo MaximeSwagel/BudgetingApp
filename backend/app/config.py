@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o-mini"
     anthropic_model: str = "claude-haiku-4-5"
     base_currency: str = "ILS"
+    # Default floor (in base currency) above which a recurring merchant is
+    # flagged as a "large" recurring expense on the Analysis page. User-
+    # overridable at runtime via /api/settings/recurring.
+    recurring_large_threshold: float = 100.0
     # Destructive "clear all data" endpoint — enabled only in dev environments.
     allow_data_reset: bool = False
 

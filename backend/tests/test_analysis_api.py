@@ -201,3 +201,68 @@ async def test_analysis_by_bank_counts(client):
     # CA row is EUR -> converted total depends on live/fallback FX rate; only
     # assert the count to keep this network-independent.
     assert by_bank["CA"]["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_analysis_recurring_empty_by_default(client):
+    body = (await client.get("/api/analysis")).json()
+    assert body["recurring"] == []
+    assert "recurring_threshold" in body
+    assert body["exclude_recurring"] is False
+
+
+@pytest.mark.asyncio
+async def test_analysis_recurring_detects_amount_increase(client):
+    for date_str, amount in [
+        ("2026-01-05", "-1000.00"),
+        ("2026-02-05", "-1000.00"),
+        ("2026-03-05", "-1300.00"),  # +30% vs. baseline -> "increased"
+    ]:
+        await client.post(
+            "/api/upload",
+            files={"file": (f"{date_str}.csv", io.BytesIO(_revolut_csv(date_str, "Landlord Rent", amount)), "text/csv")},
+        )
+
+    body = (await client.get("/api/analysis")).json()
+    assert len(body["recurring"]) == 1
+    group = body["recurring"][0]
+    assert group["status"] == "increased"
+    assert group["occurrence_count"] == 3
+    assert group["latest_amount"] == "1300.00"
+
+
+@pytest.mark.asyncio
+async def test_analysis_recurring_ignores_below_threshold(client):
+    await client.put("/api/settings/recurring", json={"recurring_large_threshold": "500"})
+    for date_str in ["2026-01-05", "2026-02-05", "2026-03-05"]:
+        await client.post(
+            "/api/upload",
+            files={"file": (f"{date_str}.csv", io.BytesIO(_revolut_csv(date_str, "Netflix", "-10.00")), "text/csv")},
+        )
+
+    body = (await client.get("/api/analysis")).json()
+    assert body["recurring"] == []
+
+
+@pytest.mark.asyncio
+async def test_analysis_exclude_recurring_toggle(client):
+    for date_str in ["2026-01-05", "2026-02-05", "2026-03-05"]:
+        await client.post(
+            "/api/upload",
+            files={"file": (f"{date_str}.csv", io.BytesIO(_revolut_csv(date_str, "Landlord Rent", "-1000.00")), "text/csv")},
+        )
+    await client.post(
+        "/api/upload",
+        files={"file": ("coffee.csv", io.BytesIO(_revolut_csv("2026-03-06", "Coffee", "-10.00")), "text/csv")},
+    )
+
+    body = (await client.get("/api/analysis")).json()
+    by_currency = {r["currency"]: r for r in body["by_currency"]}
+    assert by_currency["ILS"]["count"] == 4
+
+    body_excl = (await client.get("/api/analysis", params={"exclude_recurring": "true"})).json()
+    by_currency_excl = {r["currency"]: r for r in body_excl["by_currency"]}
+    assert by_currency_excl["ILS"]["count"] == 1
+    assert body_excl["exclude_recurring"] is True
+    # The recurring list itself always reflects full history, regardless of the toggle.
+    assert len(body_excl["recurring"]) == 1

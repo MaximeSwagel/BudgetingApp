@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { getAiModels, getAiSettings, getUploadLogs, updateAiSettings } from "../api/client";
+import {
+  getAiModels,
+  getAiSettings,
+  getRecurringSettings,
+  getUploadLogs,
+  updateAiSettings,
+  updateRecurringSettings,
+} from "../api/client";
 import { Button, Card, PageHeader, TableContainer } from "../components/ui";
 
 interface ModelInfo {
@@ -67,6 +74,10 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [logs, setLogs] = useState<UploadLog[]>([]);
+  const [recurringThreshold, setRecurringThreshold] = useState("");
+  const [recurringSaving, setRecurringSaving] = useState(false);
+  const [recurringSaved, setRecurringSaved] = useState(false);
+  const [recurringError, setRecurringError] = useState<string | null>(null);
 
   const loadData = async () => {
     const [s, m] = await Promise.all([getAiSettings(), getAiModels()]);
@@ -82,11 +93,17 @@ export default function SettingsPage() {
     setLogs(res.logs || []);
   };
 
+  const loadRecurring = async () => {
+    const res = await getRecurringSettings();
+    setRecurringThreshold(res.recurring_large_threshold);
+  };
+
   // Loaded independently of loadData() so a slow/failed logs fetch never
   // blocks the AI settings card (guarded by `!settings || !catalog` below).
   useEffect(() => {
     loadData();
     loadLogs();
+    loadRecurring();
   }, []);
 
   const handleSave = async () => {
@@ -100,6 +117,20 @@ export default function SettingsPage() {
     await loadData();
     setSaving(false);
     setSaved(true);
+  };
+
+  const handleSaveRecurring = async () => {
+    setRecurringSaving(true);
+    setRecurringSaved(false);
+    setRecurringError(null);
+    const res = await updateRecurringSettings(recurringThreshold);
+    if (res.detail) {
+      setRecurringError(res.detail);
+    } else {
+      setRecurringThreshold(res.recurring_large_threshold);
+      setRecurringSaved(true);
+    }
+    setRecurringSaving(false);
   };
 
   if (!settings || !catalog) return <Card>Loading...</Card>;
@@ -169,6 +200,34 @@ export default function SettingsPage() {
               {saving ? "Saving..." : "Save"}
             </Button>
             {saved && !saving && <span className="settings-saved">Saved.</span>}
+          </div>
+        </Card>
+
+        <Card className="settings-grid">
+          <div className="settings-field">
+            <label className="settings-label" htmlFor="recurring-threshold-input">
+              Recurring large-expense threshold (base currency)
+            </label>
+            <input
+              id="recurring-threshold-input"
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={recurringThreshold}
+              onChange={(e) => setRecurringThreshold(e.target.value)}
+            />
+            <div className="settings-model-option">
+              A merchant that recurs across 3+ months at or above this amount shows up as a
+              recurring large expense on the Analysis page, with a warning if the amount changes.
+            </div>
+          </div>
+
+          <div className="settings-field">
+            <Button onClick={handleSaveRecurring} disabled={recurringSaving}>
+              {recurringSaving ? "Saving..." : "Save"}
+            </Button>
+            {recurringSaved && !recurringSaving && <span className="settings-saved">Saved.</span>}
+            {recurringError && <span className="key-status key-status-missing">{recurringError}</span>}
           </div>
         </Card>
 

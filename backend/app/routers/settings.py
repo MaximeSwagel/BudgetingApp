@@ -1,9 +1,12 @@
+from decimal import Decimal, InvalidOperation
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
 from app.repositories import UserSettingsRepository
+from app.services.recurring import RECURRING_THRESHOLD_KEY
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -79,6 +82,29 @@ async def update_ai_settings(body: dict, db: AsyncSession = Depends(get_db)):
 
     apply_ai_settings_to_config(body)
     return _current_ai_settings()
+
+
+@router.get("/recurring")
+async def get_recurring_settings(db: AsyncSession = Depends(get_db)):
+    repo = UserSettingsRepository(db)
+    row = await repo.get_by_key(RECURRING_THRESHOLD_KEY)
+    threshold = row.value if row else str(settings.recurring_large_threshold)
+    return {"recurring_large_threshold": threshold}
+
+
+@router.put("/recurring")
+async def update_recurring_settings(body: dict, db: AsyncSession = Depends(get_db)):
+    try:
+        value = Decimal(str(body.get("recurring_large_threshold")))
+    except (InvalidOperation, TypeError):
+        raise HTTPException(status_code=400, detail="recurring_large_threshold must be a number")
+    if value <= 0:
+        raise HTTPException(status_code=400, detail="recurring_large_threshold must be positive")
+
+    repo = UserSettingsRepository(db)
+    await repo.upsert(RECURRING_THRESHOLD_KEY, str(value))
+    await repo.commit()
+    return {"recurring_large_threshold": str(value)}
 
 
 @router.get("/ai/models")

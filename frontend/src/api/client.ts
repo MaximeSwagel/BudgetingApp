@@ -103,9 +103,26 @@ export async function deleteCorrection(correctionId: number) {
   return res.json();
 }
 
-export async function getAnalysis(days?: number) {
-  const qs = days ? `?days=${days}` : "";
-  const res = await fetch(`${BASE}/analysis${qs}`);
+export async function getAnalysis(days?: number, excludeRecurring?: boolean) {
+  const params = new URLSearchParams();
+  if (days) params.set("days", String(days));
+  if (excludeRecurring) params.set("exclude_recurring", "true");
+  const qs = params.toString();
+  const res = await fetch(`${BASE}/analysis${qs ? `?${qs}` : ""}`);
+  return res.json();
+}
+
+export async function getRecurringSettings() {
+  const res = await fetch(`${BASE}/settings/recurring`);
+  return res.json();
+}
+
+export async function updateRecurringSettings(recurringLargeThreshold: string) {
+  const res = await fetch(`${BASE}/settings/recurring`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ recurring_large_threshold: recurringLargeThreshold }),
+  });
   return res.json();
 }
 
@@ -134,5 +151,10 @@ export async function deleteCategory(categoryId: number) {
 
 export async function deleteCategoryGroup(groupId: number) {
   const res = await fetch(`${BASE}/categories/groups/${groupId}`, { method: "DELETE" });
+  return res.json();
+}
+
+export async function getIncome() {
+  const res = await fetch(`${BASE}/income`);
   return res.json();
 }
