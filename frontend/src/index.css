@@ -1036,6 +1036,64 @@ tbody tr:hover {
   }
 }
 
+/* ---------- Income ---------- */
+
+.income-stream {
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.income-stream:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.income-stream:first-child {
+  padding-top: 0;
+}
+
+.income-stream-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-1);
+}
+
+.income-stream-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+  margin-bottom: var(--space-3);
+}
+
+.income-status-ok {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-success-strong);
+}
+
+.income-status-warn {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-warning-strong);
+}
+
+.income-status-bad {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-danger-strong);
+}
+
+.income-status-muted {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--ink-3);
+}
+
 /* ---------- Settings ---------- */
 
 .settings-content {

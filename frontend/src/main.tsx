@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Nav from "./components/layout/Nav";
 import DashboardPage from "./pages/DashboardPage";
 import TransactionsPage from "./pages/TransactionsPage";
+import IncomePage from "./pages/IncomePage";
 import BudgetPage from "./pages/BudgetPage";
 import AnalysisPage from "./pages/AnalysisPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -18,6 +19,7 @@ function App() {
           <Routes>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/transactions" element={<TransactionsPage />} />
+            <Route path="/income" element={<IncomePage />} />
             <Route path="/budget" element={<BudgetPage />} />
             <Route path="/analysis" element={<AnalysisPage />} />
             <Route path="/settings" element={<SettingsPage />} />

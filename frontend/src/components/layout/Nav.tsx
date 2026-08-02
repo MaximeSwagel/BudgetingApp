@@ -10,6 +10,7 @@ export default function Nav() {
           Dashboard
         </NavLink>
         <NavLink to="/transactions">Transactions</NavLink>
+        <NavLink to="/income">Income</NavLink>
         <NavLink to="/budget">Budget</NavLink>
         <NavLink to="/analysis">Analysis</NavLink>
         <NavLink to="/settings">Settings</NavLink>
