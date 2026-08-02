@@ -4,8 +4,41 @@ from decimal import Decimal
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import joinedload
 
-from app.models import Category, CategoryGroup, Transaction
+from app.models import Category, CategoryGroup, InternalTransferMatch, Transaction
 from app.repositories.base import BaseRepository
+
+
+def _not_internal_transfer():
+    """A tuple of two `NOT IN` conditions -- spread with
+    `.where(*_not_internal_transfer())` -- that excludes both legs of a
+    CONFIRMED internal transfer match, exactly the way `is_duplicate` rows
+    are excluded everywhere. `suggested` and `rejected` rows are
+    deliberately NOT excluded here (D-05/D-06): only a `confirmed` pair is
+    considered settled enough to disappear from every report.
+
+    Two separate `NOT IN` subqueries (one per id column) are used
+    deliberately instead of a single `UNION` subquery: this codebase runs
+    SQLite in tests and Postgres at runtime and already carries several
+    dialect-divergence workarounds, and a plain `NOT IN` against a single
+    column is the form with no dialect risk. Both id columns are
+    `nullable=False`, so there is no `NOT IN` NULL trap.
+
+    Deliberately NOT applied to `find_duplicate` (import-time dedup must
+    see every row, including hidden legs, or a re-upload would insert a
+    second copy), nor to `list_matching_candidates`, `count_by_category`,
+    or the inherited `get` -- a future reader should not "fix" that
+    omission.
+    """
+    confirmed_outgoing = select(InternalTransferMatch.outgoing_transaction_id).where(
+        InternalTransferMatch.status == "confirmed"
+    )
+    confirmed_incoming = select(InternalTransferMatch.incoming_transaction_id).where(
+        InternalTransferMatch.status == "confirmed"
+    )
+    return (
+        Transaction.id.notin_(confirmed_outgoing),
+        Transaction.id.notin_(confirmed_incoming),
+    )
 
 
 class TransactionRepository(BaseRepository[Transaction]):
@@ -23,12 +56,15 @@ class TransactionRepository(BaseRepository[Transaction]):
         date_to: str | None = None,
         page: int = 1,
         page_size: int = 50,
+        include_transfers: bool = False,
     ) -> tuple[list[Transaction], int]:
         query = (
             select(Transaction)
             .options(joinedload(Transaction.category).joinedload(Category.group))
             .where(Transaction.is_duplicate == False)  # noqa: E712
         )
+        if not include_transfers:
+            query = query.where(*_not_internal_transfer())
 
         if bank:
             query = query.where(Transaction.bank == bank)
@@ -163,6 +199,7 @@ class TransactionRepository(BaseRepository[Transaction]):
             .where(
                 Transaction.date >= since,
                 Transaction.is_duplicate == False,  # noqa: E712
+                *_not_internal_transfer(),
             )
             .group_by("year", "month", Transaction.is_expense)
         )
@@ -184,6 +221,7 @@ class TransactionRepository(BaseRepository[Transaction]):
                 extract("month", Transaction.date) == month,
                 Transaction.is_expense == True,  # noqa: E712
                 Transaction.is_duplicate == False,  # noqa: E712
+                *_not_internal_transfer(),
             )
             .group_by("group_name")
         )
@@ -207,6 +245,7 @@ class TransactionRepository(BaseRepository[Transaction]):
                 Transaction.is_expense == True,  # noqa: E712
                 Transaction.is_duplicate == False,  # noqa: E712
                 Transaction.date >= since,
+                *_not_internal_transfer(),
             )
         )
         if exclude_ids:
@@ -230,6 +269,7 @@ class TransactionRepository(BaseRepository[Transaction]):
             .where(
                 Transaction.is_expense == True,  # noqa: E712
                 Transaction.is_duplicate == False,  # noqa: E712
+                *_not_internal_transfer(),
             )
         )
         if exclude_ids:
@@ -246,7 +286,7 @@ class TransactionRepository(BaseRepository[Transaction]):
             func.sum(Transaction.original_amount).label("original_total"),
             func.sum(Transaction.converted_amount).label("converted_total"),
             func.count().label("count"),
-        ).where(Transaction.is_duplicate == False)  # noqa: E712
+        ).where(Transaction.is_duplicate == False, *_not_internal_transfer())  # noqa: E712
         if exclude_ids:
             query = query.where(Transaction.id.notin_(exclude_ids))
         result = await self.db.execute(query.group_by(Transaction.original_currency))
@@ -262,7 +302,8 @@ class TransactionRepository(BaseRepository[Transaction]):
         `daily_category_spend` for `exclude_ids`."""
         result = await self.db.execute(
             select(Transaction.id, Transaction.bank, Transaction.converted_amount).where(
-                Transaction.is_duplicate == False  # noqa: E712
+                Transaction.is_duplicate == False,  # noqa: E712
+                *_not_internal_transfer(),
             )
         )
         rows = result.all()
@@ -301,6 +342,7 @@ class TransactionRepository(BaseRepository[Transaction]):
                 Transaction.is_expense == True,  # noqa: E712
                 Transaction.is_duplicate == False,  # noqa: E712
                 Transaction.converted_amount.isnot(None),
+                *_not_internal_transfer(),
             )
         )
         return result.all()
@@ -348,7 +390,7 @@ class TransactionRepository(BaseRepository[Transaction]):
                 Transaction.original_amount,
                 Transaction.description,
                 Transaction.bank,
-            ).where(Transaction.is_duplicate == False)  # noqa: E712
+            ).where(Transaction.is_duplicate == False, *_not_internal_transfer())  # noqa: E712
         )
         rows = result.all()
 
@@ -393,6 +435,7 @@ class TransactionRepository(BaseRepository[Transaction]):
                 extract("year", Transaction.date) == year,
                 Transaction.is_expense == True,  # noqa: E712
                 Transaction.is_duplicate == False,  # noqa: E712
+                *_not_internal_transfer(),
             )
             .group_by("month", "group_name", "category_name")
             .order_by("group_name", "category_name", "month")

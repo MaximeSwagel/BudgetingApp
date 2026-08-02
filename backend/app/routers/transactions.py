@@ -77,6 +77,7 @@ async def list_transactions(
     date_to: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
+    include_transfers: bool = Query(False),
 ):
     repo = TransactionRepository(db)
     transactions, total = await repo.list_filtered(
@@ -89,6 +90,7 @@ async def list_transactions(
         date_to=date_to,
         page=page,
         page_size=page_size,
+        include_transfers=include_transfers,
     )
 
     key_map = await CategoryCorrectionRepository(db).key_map()
