@@ -113,8 +113,8 @@ The backend exposes a REST API under `/api`:
 | `POST` | `/api/categories` | Create a new category within a group |
 | `PUT` | `/api/categories/{id}` | Rename a category or move it to a different group |
 | `GET` | `/api/budget/summary` | Monthly budget summary by category group/category for a given year, with annual totals |
-| `POST` | `/api/budget/group-targets` | Set a primary category's recurring target, effective from the current month onward |
-| `DELETE` | `/api/budget/group-targets/{group_id}` | Clear a primary category's target from the current month onward |
+| `POST` | `/api/budget/group-targets` | Set a primary category's target (applies to every month until changed) |
+| `DELETE` | `/api/budget/group-targets/{group_id}` | Clear a primary category's target for every month |
 | `GET` | `/api/health` | Health check |
 
 Supported bank CSV formats (auto-detected from the header row): Revolut (French), Revolut (English), and Crédit Agricole. Merged multi-currency Revolut exports are not supported — upload per-currency account statements instead.

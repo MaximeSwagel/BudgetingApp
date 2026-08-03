@@ -27,8 +27,8 @@ requests from any origin permitted by CORS. `backend/app/main.py` configures COR
 | POST | `/api/categories` | Create a new category within a group | No |
 | PUT | `/api/categories/{category_id}` | Update a category's name or group | No |
 | GET | `/api/budget/summary` | Monthly/annual spending summary by category, matched against per-group budget targets | No |
-| POST | `/api/budget/group-targets` | Set a primary category's recurring target, effective from the current month onward | No |
-| DELETE | `/api/budget/group-targets/{group_id}` | Clear a primary category's target from the current month onward | No |
+| POST | `/api/budget/group-targets` | Set a primary category's target (applies to every month until changed) | No |
+| DELETE | `/api/budget/group-targets/{group_id}` | Clear a primary category's target for every month | No |
 
 Routes are defined in `backend/app/routers/upload.py`, `backend/app/routers/transactions.py`,
 `backend/app/routers/categories.py`, and `backend/app/routers/budget.py`, and registered in
@@ -204,7 +204,7 @@ Query parameters:
 
 Aggregates all non-duplicate expense transactions (`is_expense == true`) for the given year, grouped by
 month, category group, and category, and cross-references each primary category's (`CategoryGroup`)
-recurring, effective-dated target (`CategoryGroupTarget`). Response shape:
+current target (`CategoryGroupTarget`). Response shape:
 
 ```json
 {
@@ -234,9 +234,9 @@ recurring, effective-dated target (`CategoryGroupTarget`). Response shape:
 
 All monetary values are serialized as strings (`Decimal` → `str`) to preserve precision. Sub-category
 objects carry no `targets` key -- phase 1 of Budget Targets is group-level only. A group's `targets` map
-gives the effective target for every month 1-12 of the queried `year` (string amount, or `null` when no
-target was in effect that month); `current_target` is the effective target for the real-world current
-month regardless of which `year` is being viewed.
+carries the same current target for all 12 months of the queried `year` (string amount, or `null` when
+the group has no target), and is identical whichever `year` is requested; `current_target` is that same
+value.
 
 ### `POST /api/budget/group-targets`
 
@@ -246,18 +246,19 @@ Request body:
 { "group_id": 1, "amount": 12000.00 }
 ```
 
-Upserts the target for `group_id`, effective from the current real-world calendar month onward (never
-the `year` being viewed elsewhere). Calling this again within the same month updates that same row in
-place rather than creating a new one; earlier months keep whatever target was active back then. Returns
-`{"ok": true, "group_id": 1, "amount": "12000.00", "effective_month": "2026-08-01"}`. 404 if `group_id`
-does not match a primary category; 400 if `amount` is missing/non-numeric or negative.
+Upserts the target for `group_id`, stored against the current real-world calendar month (never the
+`year` being viewed elsewhere). Calling this again within the same month updates that same row in place
+rather than creating a new one -- but the amount applies to every month, past and future. Returns
+`{"ok": true, "group_id": 1, "amount": "12000.00", "effective_month": "2026-08-01"}`. `effective_month`
+is still returned as the storage marker of when the row was written. 404 if `group_id` does not match a
+primary category; 400 if `amount` is missing/non-numeric or negative.
 
 ### `DELETE /api/budget/group-targets/{group_id}`
 
-Clears `group_id`'s target from the current real-world month onward by writing a null-amount row for
-that month -- it does not delete any existing rows, so months before this one keep the target that was
-active then. Returns `{"ok": true, "group_id": 1, "effective_month": "2026-08-01"}`. 404 if `group_id`
-does not match a primary category.
+Clears `group_id`'s target by writing a null-amount row for the current real-world month rather than
+deleting rows -- the result is that no month shows a target until a new one is set. Returns
+`{"ok": true, "group_id": 1, "effective_month": "2026-08-01"}`. 404 if `group_id` does not match a
+primary category.
 
 ## Error codes
 

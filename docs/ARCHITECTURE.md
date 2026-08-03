@@ -106,7 +106,7 @@ A typical CSV import request flows through the system as follows:
    /api/transactions/{id}/category` to manually recategorize a row. `BudgetPage.tsx` calls
    `GET /api/budget/summary?year=` (`backend/app/routers/budget.py`), which aggregates `converted_amount` by
    month and category (via SQL `extract('month', ...)` + `GROUP BY`) and merges in each primary category's
-   recurring, effective-dated target (`CategoryGroupTarget`, set/cleared via `POST`/`DELETE
+   current target (`CategoryGroupTarget`, set/cleared via `POST`/`DELETE
    /api/budget/group-targets`), producing the nested group → category → month structure the frontend
    renders as a spreadsheet-style table, plus a per-group `targets`/`current_target` pair used to colour
    the group-total row.
@@ -118,7 +118,7 @@ A typical CSV import request flows through the system as follows:
 | `Transaction` model | `backend/app/models/transaction.py` | Central record: original amount/currency, converted amount/rate/base currency, bank, category link, duplicate flag, expense flag. Uses `Numeric(12,2)` (not `float`) for all money columns. |
 | `ImportBatch` model | `backend/app/models/transaction.py` | Groups transactions by upload event (filename, bank, timestamp, count) for traceability of each CSV import. |
 | `Category` / `CategoryGroup` models | `backend/app/models/transaction.py` | Two-level budget hierarchy (e.g., group `"Home Expenses"` → category `"Rent"`) mirroring the user's Excel budget structure. Seeded on startup from `SEED_CATEGORIES` in `main.py`. |
-| `CategoryGroupTarget` model | `backend/app/models/transaction.py` | Recurring, effective-dated monthly target amount per primary category (`CategoryGroup`). A row's `effective_month` marks the month its `amount` (nullable, meaning "cleared") starts applying from; the effective target for any month is the row with the greatest `effective_month` at or before it, joined against actual spend in the budget summary endpoint. |
+| `CategoryGroupTarget` model | `backend/app/models/transaction.py` | A single current target amount per primary category (`CategoryGroup`), applying to every month shown, past and future, joined against actual spend in the budget summary endpoint. `amount` is nullable, meaning "cleared". `effective_month` records which month a row was written against and is retained as groundwork for possible future versioning, but is not consulted on read -- only the most recently written row per group is used. |
 | Bank parser functions | `backend/app/parsers/revolut.py`, `backend/app/parsers/ca.py` | Each bank/format has its own pure function (`content: bytes -> list[dict]`) that normalizes rows into a common transaction-dict shape, isolating bank-specific CSV quirks (delimiters, encodings, multi-line wrapped labels for Crédit Agricole). |
 | `detect_bank_format()` | `backend/app/parsers/detector.py` | Single dispatch point that inspects CSV header content to pick the correct parser, raising `ValueError` on unrecognized formats. |
 | `categorize_transactions()` | `backend/app/services/categorizer.py` | Wraps the OpenAI chat completion call, including batching, prompt construction from the fixed category hierarchy, and defensive fallback to `"Uncategorized"` on any parsing/API failure. |

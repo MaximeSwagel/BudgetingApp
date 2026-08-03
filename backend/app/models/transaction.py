@@ -73,10 +73,10 @@ class CategoryGroupTarget(Base):
     (CategoryGroup) -- phase 1 of Budget Targets. Sub-category targets are
     deliberately out of scope (deferred to a later phase).
 
-    Targets are absolute, not effective-dated: whichever row was most
-    recently written for a group is its current target, and that value
-    applies to every month shown -- past, present, and future -- until
-    changed or cleared. There is no per-month/date-gated lookup.
+    Targets are absolute: whichever row was most recently written for a
+    group is its current target, and that value applies to every month
+    shown -- past, present, and future -- until changed or cleared. There
+    is no per-month/date-gated lookup.
 
     `amount` is nullable: a NULL row means the target was explicitly
     cleared, rather than absent -- deleting a row would resurrect whatever
