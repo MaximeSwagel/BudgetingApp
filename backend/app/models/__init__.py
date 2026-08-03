@@ -1,9 +1,9 @@
 from app.models.base import Base
 from app.models.transaction import (
-    BudgetTarget,
     Category,
     CategoryCorrection,
     CategoryGroup,
+    CategoryGroupTarget,
     ImportBatch,
     InternalTransferMatch,
     Transaction,
@@ -18,7 +18,7 @@ __all__ = [
     "Category",
     "CategoryCorrection",
     "CategoryGroup",
-    "BudgetTarget",
+    "CategoryGroupTarget",
     "UserSettings",
     "UploadLog",
     "InternalTransferMatch",

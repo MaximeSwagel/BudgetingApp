@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -68,16 +68,37 @@ class Transaction(Base):
     )
 
 
-class BudgetTarget(Base):
-    __tablename__ = "budget_targets"
+class CategoryGroupTarget(Base):
+    """A recurring, effective-dated monthly spending ceiling for one main
+    category (CategoryGroup) -- phase 1 of Budget Targets. Sub-category
+    targets are deliberately out of scope (deferred to a later phase).
+
+    `amount` is nullable: a NULL row means the target was explicitly
+    cleared as of `effective_month` onward, rather than absent -- deleting
+    a row would resurrect whatever target preceded it, which is the
+    opposite of what "clear" means here.
+
+    `effective_month` is always the first day of a month and marks the
+    point from which this row's `amount` applies -- it is a month-START
+    marker, not "the one month this target applies to". A lookup for a
+    given (group, year, month) means: among all of this group's rows
+    (across every year), find the one with the greatest `effective_month`
+    that is `<=` the month being rendered. That row's amount (possibly
+    NULL) is the effective target for that month and every later month,
+    until a newer row supersedes it.
+    """
+
+    __tablename__ = "category_group_targets"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"), nullable=False)
-    year: Mapped[int] = mapped_column(Integer, nullable=False)
-    month: Mapped[int] = mapped_column(Integer, nullable=False)
-    amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    group_id: Mapped[int] = mapped_column(ForeignKey("category_groups.id"), nullable=False)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    effective_month: Mapped[date] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    __table_args__ = (UniqueConstraint("category_id", "year", "month", name="uq_budget_target"),)
+    __table_args__ = (
+        UniqueConstraint("group_id", "effective_month", name="uq_group_target_month"),
+    )
 
 
 class UserSettings(Base):

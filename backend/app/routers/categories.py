@@ -4,9 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import Category, CategoryGroup
 from app.repositories import (
-    BudgetTargetRepository,
     CategoryCorrectionRepository,
     CategoryGroupRepository,
+    CategoryGroupTargetRepository,
     CategoryRepository,
     TransactionRepository,
 )
@@ -103,6 +103,7 @@ async def delete_group(group_id: int, db: AsyncSession = Depends(get_db)):
             detail=f"Cannot delete '{group.name}': it still has {remaining} subcategory(ies). Remove those first.",
         )
 
+    await CategoryGroupTargetRepository(db).delete_by_group(group_id)
     await repo.remove(group)
     await repo.commit()
     return {"ok": True}
@@ -113,9 +114,9 @@ async def delete_category(category_id: int, db: AsyncSession = Depends(get_db)):
     """D-02: safe-block-on-real-data. Blocks with 409 if any transaction
     still references this category (never silently orphan imported
     financial rows -- the user must reassign those first). If there are no
-    transactions, proactively cleans derived/metadata references (budget
-    targets, correction FKs) so Postgres never sees a dangling FK, then
-    deletes the category itself."""
+    transactions, proactively cleans derived/metadata references
+    (correction FKs) so Postgres never sees a dangling FK, then deletes the
+    category itself."""
     repo = CategoryRepository(db)
     category = await repo.get(category_id)
     if not category:
@@ -132,7 +133,6 @@ async def delete_category(category_id: int, db: AsyncSession = Depends(get_db)):
             ),
         )
 
-    await BudgetTargetRepository(db).delete_by_category(category_id)
     await CategoryCorrectionRepository(db).clear_category(category_id)
     await repo.remove(category)
     await repo.commit()
