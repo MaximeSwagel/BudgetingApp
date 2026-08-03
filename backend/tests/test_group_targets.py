@@ -60,7 +60,7 @@ async def test_upsert_within_same_month_updates_in_place(db_session):
 
 
 @pytest.mark.asyncio
-async def test_effective_dating_forward(db_session):
+async def test_single_target_applies_to_every_month(db_session):
     async with db_session() as session:
         group_id = await _make_group(session, "G1")
         repo = CategoryGroupTargetRepository(session)
@@ -69,13 +69,13 @@ async def test_effective_dating_forward(db_session):
         )
         await session.commit()
 
-        targets = await repo.effective_targets_for_year(2026)
+        targets = await repo.current_targets_by_month()
         for month in range(1, 13):
             assert targets[group_id][month] == Decimal("500")
 
 
 @pytest.mark.asyncio
-async def test_supersede_mid_year(db_session):
+async def test_latest_row_wins_for_every_month(db_session):
     async with db_session() as session:
         group_id = await _make_group(session, "G1")
         repo = CategoryGroupTargetRepository(session)
@@ -87,15 +87,13 @@ async def test_supersede_mid_year(db_session):
         )
         await session.commit()
 
-        targets = await repo.effective_targets_for_year(2026)
-        for month in range(1, 6):
-            assert targets[group_id][month] == Decimal("500")
-        for month in range(6, 13):
+        targets = await repo.current_targets_by_month()
+        for month in range(1, 13):
             assert targets[group_id][month] == Decimal("800")
 
 
 @pytest.mark.asyncio
-async def test_clear_semantics(db_session):
+async def test_clearing_removes_target_from_every_month(db_session):
     async with db_session() as session:
         group_id = await _make_group(session, "G1")
         repo = CategoryGroupTargetRepository(session)
@@ -110,17 +108,16 @@ async def test_clear_semantics(db_session):
         )
         await session.commit()
 
-        targets = await repo.effective_targets_for_year(2026)
-        for month in range(1, 6):
-            assert targets[group_id][month] == Decimal("500")
-        for month in range(6, 9):
-            assert targets[group_id][month] == Decimal("800")
-        for month in range(9, 13):
+        targets = await repo.current_targets_by_month()
+        for month in range(1, 13):
             assert targets[group_id][month] is None
+
+        current = await repo.current_targets()
+        assert current[group_id] is None
 
 
 @pytest.mark.asyncio
-async def test_carry_over_across_year_boundary(db_session):
+async def test_no_date_gating_future_row_wins(db_session):
     async with db_session() as session:
         group_id = await _make_group(session, "G1")
         repo = CategoryGroupTargetRepository(session)
@@ -128,17 +125,13 @@ async def test_carry_over_across_year_boundary(db_session):
             group_id=group_id, amount=Decimal("500"), effective_month=date(2026, 1, 1)
         )
         await repo.upsert_for_month(
-            group_id=group_id, amount=Decimal("800"), effective_month=date(2026, 6, 1)
+            group_id=group_id, amount=Decimal("900"), effective_month=date(2030, 1, 1)
         )
         await session.commit()
 
-        targets_2027 = await repo.effective_targets_for_year(2027)
+        targets = await repo.current_targets_by_month()
         for month in range(1, 13):
-            assert targets_2027[group_id][month] == Decimal("800")
-
-        targets_2025 = await repo.effective_targets_for_year(2025)
-        for month in range(1, 13):
-            assert targets_2025[group_id][month] is None
+            assert targets[group_id][month] == Decimal("900")
 
 
 @pytest.mark.asyncio
@@ -156,16 +149,16 @@ async def test_group_isolation(db_session):
         )
         await session.commit()
 
-        targets = await repo.effective_targets_for_year(2026)
+        targets = await repo.current_targets_by_month()
         for month in range(1, 13):
             assert targets[group1][month] == Decimal("100")
             assert targets[group2][month] == Decimal("999")
-        # group3 has no rows at all -- absent from the effective-dating map
+        # group3 has no rows at all -- absent from the map
         assert group3 not in targets
 
 
 @pytest.mark.asyncio
-async def test_effective_targets_at_and_delete_by_group(db_session):
+async def test_current_targets_and_delete_by_group(db_session):
     async with db_session() as session:
         group1 = await _make_group(session, "G1")
         group2 = await _make_group(session, "G2")
@@ -181,8 +174,9 @@ async def test_effective_targets_at_and_delete_by_group(db_session):
         )
         await session.commit()
 
-        at_july = await repo.effective_targets_at(date(2026, 7, 1))
-        assert at_july[group1] == Decimal("800")
+        current = await repo.current_targets()
+        assert current[group1] == Decimal("800")
+        assert current[group2] == Decimal("300")
 
         await repo.delete_by_group(group1)
         await session.commit()

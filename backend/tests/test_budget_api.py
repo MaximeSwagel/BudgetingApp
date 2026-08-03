@@ -74,7 +74,7 @@ async def test_summary_has_no_target_when_none_set(client):
 
 
 @pytest.mark.asyncio
-async def test_set_group_target_applies_from_current_month(client):
+async def test_set_group_target_applies_to_every_month(client):
     categories_resp = await client.get("/api/categories")
     group_id = categories_resp.json()[0]["id"]
 
@@ -90,10 +90,8 @@ async def test_set_group_target_applies_from_current_month(client):
     group = next(g for g in groups if g["group_id"] == group_id)
 
     assert group["current_target"] == "2000.00"
-    assert group["targets"][str(today.month)] == "2000.00"
-
-    if today.month > 1:
-        assert group["targets"][str(today.month - 1)] is None
+    for m in range(1, 13):
+        assert group["targets"][str(m)] == "2000.00"
 
 
 @pytest.mark.asyncio
@@ -111,6 +109,8 @@ async def test_setting_target_twice_in_same_month_updates_one_row(client, db_ses
     summary = await client.get("/api/budget/summary", params={"year": today.year})
     group = next(g for g in summary.json()["groups"] if g["group_id"] == group_id)
     assert group["current_target"] == "2500.00"
+    for m in range(1, 13):
+        assert group["targets"][str(m)] == "2500.00"
 
     async with db_session() as session:
         result = await session.execute(
@@ -121,7 +121,7 @@ async def test_setting_target_twice_in_same_month_updates_one_row(client, db_ses
 
 
 @pytest.mark.asyncio
-async def test_effective_target_carries_forward_and_is_superseded(client, db_session):
+async def test_latest_target_row_applies_to_every_month_and_year(client, db_session):
     categories_resp = await client.get("/api/categories")
     group_id = categories_resp.json()[0]["id"]
 
@@ -138,17 +138,24 @@ async def test_effective_target_carries_forward_and_is_superseded(client, db_ses
         )
         await session.commit()
 
-    summary = await client.get("/api/budget/summary", params={"year": 2026})
-    group = next(g for g in summary.json()["groups"] if g["group_id"] == group_id)
+    summary_2026 = await client.get("/api/budget/summary", params={"year": 2026})
+    group_2026 = next(g for g in summary_2026.json()["groups"] if g["group_id"] == group_id)
+    for m in range(1, 13):
+        assert group_2026["targets"][str(m)] == "800.00"
 
-    for m in range(1, 6):
-        assert group["targets"][str(m)] == "500.00"
-    for m in range(6, 13):
-        assert group["targets"][str(m)] == "800.00"
+    summary_2025 = await client.get("/api/budget/summary", params={"year": 2025})
+    group_2025 = next(g for g in summary_2025.json()["groups"] if g["group_id"] == group_id)
+    for m in range(1, 13):
+        assert group_2025["targets"][str(m)] == "800.00"
+
+    summary_2027 = await client.get("/api/budget/summary", params={"year": 2027})
+    group_2027 = next(g for g in summary_2027.json()["groups"] if g["group_id"] == group_id)
+    for m in range(1, 13):
+        assert group_2027["targets"][str(m)] == "800.00"
 
 
 @pytest.mark.asyncio
-async def test_clear_group_target_clears_from_now_on(client):
+async def test_clear_group_target_clears_every_month(client):
     categories_resp = await client.get("/api/categories")
     group_id = categories_resp.json()[0]["id"]
 
@@ -162,7 +169,13 @@ async def test_clear_group_target_clears_from_now_on(client):
     group = next(g for g in summary.json()["groups"] if g["group_id"] == group_id)
 
     assert group["current_target"] is None
-    assert group["targets"][str(today.month)] is None
+    for m in range(1, 13):
+        assert group["targets"][str(m)] is None
+
+    summary_2025 = await client.get("/api/budget/summary", params={"year": 2025})
+    group_2025 = next(g for g in summary_2025.json()["groups"] if g["group_id"] == group_id)
+    for m in range(1, 13):
+        assert group_2025["targets"][str(m)] is None
 
 
 @pytest.mark.asyncio
