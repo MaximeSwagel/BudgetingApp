@@ -209,6 +209,7 @@ current target (`CategoryGroupTarget`). Response shape:
 ```json
 {
   "year": 2026,
+  "base_currency": "ILS",
   "groups": [
     {
       "group": "Home Expenses",
@@ -223,7 +224,7 @@ current target (`CategoryGroupTarget`). Response shape:
       ],
       "monthly_totals": { "1": "12500.00", "...": "0.00" },
       "annual_total": "150000.00",
-      "targets": { "1": "12000.00", "2": null, "...": null },
+      "targets": { "1": "12000.00", "2": "12000.00", "...": "12000.00" },
       "current_target": "12000.00",
       "suggested_target": null
     }
@@ -233,11 +234,16 @@ current target (`CategoryGroupTarget`). Response shape:
 }
 ```
 
-All monetary values are serialized as strings (`Decimal` → `str`) to preserve precision. Sub-category
-objects carry no `targets` key -- phase 1 of Budget Targets is group-level only. A group's `targets` map
-carries the same current target for all 12 months of the queried `year` (string amount, or `null` when
-the group has no target), and is identical whichever `year` is requested; `current_target` is that same
-value.
+All monetary values are serialized as strings (`Decimal` → `str`) to preserve precision. `base_currency`
+mirrors every other data endpoint (dashboard/income/analysis/transfers) rather than leaving the caller to
+guess it. Sub-category objects carry no `targets` key -- phase 1 of Budget Targets is group-level only. A
+group's `targets` map carries the same current target for all 12 months of the queried `year` (string
+amount, or `null` for every month when the group has no target), and is identical whichever `year` is
+requested; `current_target` is that same value.
+
+The frontend's `/budget/targets` page (`BudgetTargetsPage.tsx`) is a pure client-side read of this same
+endpoint -- it adds no new backend route. See `frontend/src/lib/budgetAnalysis.ts` for the target-vs-actual
+variance/percentage math it layers on top.
 
 `suggested_target` is an auto-proposed starting point for groups that have no target yet: the average
 expense magnitude across the last 3 completed calendar months (not the queried `year`, and not including
