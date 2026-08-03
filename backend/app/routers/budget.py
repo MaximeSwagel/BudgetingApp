@@ -1,13 +1,21 @@
-from decimal import Decimal
+from datetime import date
+from decimal import Decimal, InvalidOperation
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import BudgetTarget
-from app.repositories import BudgetTargetRepository, CategoryGroupRepository, TransactionRepository
+from app.repositories import CategoryGroupRepository, CategoryGroupTargetRepository, TransactionRepository
 
 router = APIRouter(prefix="/api/budget", tags=["budget"])
+
+
+def _current_month_start() -> date:
+    """The real-world "now" month-start a target write applies from (D-03).
+    Deliberately derived from `date.today()`, never from the `year` query
+    parameter of the summary endpoint below -- the year dropdown only
+    changes what's being VIEWED, not when a new target takes effect."""
+    return date.today().replace(day=1)
 
 
 @router.get("/summary")
@@ -21,9 +29,9 @@ async def budget_summary(
     group_repo = CategoryGroupRepository(db)
     all_groups = await group_repo.list_with_categories()
 
-    target_repo = BudgetTargetRepository(db)
-    targets = await target_repo.list_by_year(year)
-    target_map = {(t.category_id, t.month): t.amount for t in targets}
+    target_repo = CategoryGroupTargetRepository(db)
+    targets_by_group = await target_repo.effective_targets_for_year(year)
+    current_by_group = await target_repo.effective_targets_at(_current_month_start())
 
     spending: dict[str, dict[str, dict[int, Decimal]]] = {}
     for row in rows:
@@ -50,17 +58,12 @@ async def budget_summary(
                 "category_id": cat.id,
                 "months": {},
                 "annual_total": Decimal("0"),
-                "targets": {},
             }
 
             for month in range(1, 13):
                 amount = spending.get(group.name, {}).get(cat.name, {}).get(month, Decimal("0"))
                 cat_data["months"][month] = str(amount)
                 cat_data["annual_total"] += amount
-
-                target = target_map.get((cat.id, month))
-                if target is not None:
-                    cat_data["targets"][month] = str(target)
 
                 group_data["monthly_totals"][month] = str(
                     Decimal(group_data["monthly_totals"].get(month, "0")) + amount
@@ -71,6 +74,15 @@ async def budget_summary(
             group_data["categories"].append(cat_data)
 
         group_data["annual_total"] = str(group_data["annual_total"])
+        # Targets are group-level only (D-01/D-06) and are emitted as
+        # POSITIVE strings -- never negated to match the negative expense
+        # convention. The magnitude comparison happens on the client (D-08).
+        group_targets = targets_by_group.get(group.id, {})
+        group_data["targets"] = {
+            month: (str(v) if v is not None else None) for month, v in group_targets.items()
+        }
+        current_target = current_by_group.get(group.id)
+        group_data["current_target"] = str(current_target) if current_target is not None else None
         budget_data.append(group_data)
 
     total_expense_monthly: dict[int, Decimal] = {}
@@ -89,24 +101,54 @@ async def budget_summary(
     }
 
 
-@router.post("/targets")
-async def set_budget_target(body: dict, db: AsyncSession = Depends(get_db)):
-    repo = BudgetTargetRepository(db)
-    target = await repo.get_by_key(
-        category_id=body["category_id"], year=body["year"], month=body["month"]
+@router.post("/group-targets")
+async def set_group_target(body: dict, db: AsyncSession = Depends(get_db)):
+    """Upserts the target for the current real-world month (D-03) -- never
+    the year being viewed on the summary page."""
+    group_repo = CategoryGroupRepository(db)
+    group = await group_repo.get(body.get("group_id"))
+    if not group:
+        raise HTTPException(status_code=404, detail="Primary category not found")
+
+    try:
+        amount = Decimal(str(body["amount"]))
+    except (InvalidOperation, TypeError, KeyError):
+        raise HTTPException(status_code=400, detail="amount must be a number")
+
+    if amount < 0:
+        raise HTTPException(status_code=400, detail="amount must be zero or greater")
+
+    effective_month = _current_month_start()
+    target_repo = CategoryGroupTargetRepository(db)
+    await target_repo.upsert_for_month(
+        group_id=group.id, amount=amount, effective_month=effective_month
     )
+    await db.commit()
 
-    if target:
-        target.amount = Decimal(str(body["amount"]))
-    else:
-        repo.add(
-            BudgetTarget(
-                category_id=body["category_id"],
-                year=body["year"],
-                month=body["month"],
-                amount=Decimal(str(body["amount"])),
-            )
-        )
+    return {
+        "ok": True,
+        "group_id": group.id,
+        "amount": str(amount),
+        "effective_month": effective_month.isoformat(),
+    }
 
-    await repo.commit()
-    return {"ok": True}
+
+@router.delete("/group-targets/{group_id}")
+async def clear_group_target(group_id: int, db: AsyncSession = Depends(get_db)):
+    """Clears a group's target by writing a NULL-amount row for the current
+    real-world month (D-05) rather than deleting rows -- months before this
+    one keep whatever target was active then; only this month onward goes
+    back to "no target"."""
+    group_repo = CategoryGroupRepository(db)
+    group = await group_repo.get(group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="Primary category not found")
+
+    effective_month = _current_month_start()
+    target_repo = CategoryGroupTargetRepository(db)
+    await target_repo.upsert_for_month(
+        group_id=group.id, amount=None, effective_month=effective_month
+    )
+    await db.commit()
+
+    return {"ok": True, "group_id": group.id, "effective_month": effective_month.isoformat()}
