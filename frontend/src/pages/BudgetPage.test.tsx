@@ -343,6 +343,7 @@ describe("BudgetPage", () => {
     expect(
       screen.queryByLabelText("Monthly target for Household Expenses")
     ).not.toBeInTheDocument();
+    expect(screen.getByTitle(/every month/i)).toBeInTheDocument();
   });
 
   it("hides the target editor until Edit is toggled on", async () => {
