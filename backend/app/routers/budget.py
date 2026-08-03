@@ -4,6 +4,7 @@ from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.repositories import CategoryGroupRepository, CategoryGroupTargetRepository, TransactionRepository
 
@@ -165,6 +166,7 @@ async def budget_summary(
 
     return {
         "year": year,
+        "base_currency": settings.base_currency,
         "groups": budget_data,
         "total_expense_monthly": {m: str(v) for m, v in total_expense_monthly.items()},
         "total_expense_annual": str(total_expense_annual),
