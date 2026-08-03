@@ -47,6 +47,7 @@ export interface BudgetGroupData {
   annual_total: string;
   targets: Record<string, string | null>;
   current_target: string | null;
+  suggested_target: string | null;
 }
 
 export interface BudgetSummary {

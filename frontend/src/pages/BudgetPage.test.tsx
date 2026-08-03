@@ -17,6 +17,7 @@ function nullTargetsMap(): Record<string, string | null> {
 function makeSummary(overrides?: {
   targets?: Record<string, string | null>;
   currentTarget?: string | null;
+  suggestedTarget?: string | null;
   monthlyTotals?: Record<string, string>;
 }): BudgetSummary {
   return {
@@ -37,6 +38,7 @@ function makeSummary(overrides?: {
         annual_total: "-100.00",
         targets: overrides?.targets ?? nullTargetsMap(),
         current_target: overrides?.currentTarget ?? null,
+        suggested_target: overrides?.suggestedTarget ?? null,
       },
     ],
     total_expense_monthly: { "1": "-100.00" },
@@ -400,6 +402,52 @@ describe("BudgetPage", () => {
       expect(screen.getByText("amount must be zero or greater")).toBeInTheDocument()
     );
     expect(api.getBudgetSummary).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a suggested target read-only when no target is set", async () => {
+    const summary = makeSummary({ suggestedTarget: "300.00" });
+    vi.mocked(api.getBudgetSummary).mockResolvedValue(summary);
+
+    render(<BudgetPage />);
+    await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
+
+    expect(screen.getByText(/suggested 300\/mo/)).toBeInTheDocument();
+  });
+
+  it("hides the suggested-target hint once a target is set", async () => {
+    const summary = makeSummary({ currentTarget: "2000.00", suggestedTarget: "300.00" });
+    vi.mocked(api.getBudgetSummary).mockResolvedValue(summary);
+
+    render(<BudgetPage />);
+    await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
+
+    expect(screen.queryByText(/suggested/)).not.toBeInTheDocument();
+  });
+
+  it("applies a suggested target in edit mode and reloads the budget", async () => {
+    const summary = makeSummary({ suggestedTarget: "300.00" });
+    vi.mocked(api.getBudgetSummary).mockResolvedValue(summary);
+    vi.mocked(api.setGroupTarget).mockResolvedValue({ ok: true });
+
+    render(<BudgetPage />);
+    await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    fireEvent.click(screen.getByText("Use suggested 300"));
+
+    await waitFor(() => expect(api.setGroupTarget).toHaveBeenCalledWith(1, "300.00"));
+    await waitFor(() => expect(api.getBudgetSummary).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not offer a suggestion button once a target is set", async () => {
+    const summary = makeSummary({ currentTarget: "2000.00", suggestedTarget: "300.00" });
+    vi.mocked(api.getBudgetSummary).mockResolvedValue(summary);
+
+    render(<BudgetPage />);
+    await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(screen.queryByText(/Use suggested/)).not.toBeInTheDocument();
   });
 
   it("clears a group target after confirm", async () => {

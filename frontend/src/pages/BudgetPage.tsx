@@ -136,6 +136,19 @@ export default function BudgetPage() {
     await loadBudget();
   };
 
+  const handleApplySuggestedTarget = async (group: BudgetGroupData) => {
+    if (group.suggested_target === null) return;
+
+    const result = await setGroupTarget(group.group_id, group.suggested_target);
+    if (result?.detail) {
+      setStatusMsg({ variant: "error", text: String(result.detail) });
+      return;
+    }
+    setStatusMsg(null);
+    clearTargetDraft(group.group_id);
+    await loadBudget();
+  };
+
   const handleClearTarget = async (group: BudgetGroupData) => {
     if (
       !window.confirm(
@@ -280,6 +293,16 @@ export default function BudgetPage() {
                                 Clear target
                               </button>
                             )}
+                            {group.current_target === null && group.suggested_target !== null && (
+                              <button
+                                type="button"
+                                className="btn btn-secondary btn-inline"
+                                title="Based on your average spend in this category over the last 3 months"
+                                onClick={() => handleApplySuggestedTarget(group)}
+                              >
+                                Use suggested {formatTargetAmount(group.suggested_target)}
+                              </button>
+                            )}
                           </span>
                         ) : (
                           <span
@@ -289,7 +312,9 @@ export default function BudgetPage() {
                             Target:{" "}
                             {group.current_target !== null
                               ? `${formatTargetAmount(group.current_target)} /mo`
-                              : "—"}
+                              : group.suggested_target !== null
+                                ? `— (suggested ${formatTargetAmount(group.suggested_target)}/mo)`
+                                : "—"}
                           </span>
                         )}
                         {editMode && (
