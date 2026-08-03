@@ -11,10 +11,13 @@ router = APIRouter(prefix="/api/budget", tags=["budget"])
 
 
 def _current_month_start() -> date:
-    """The real-world "now" month-start a target write applies from (D-03).
+    """The real-world "now" month-start a target write is stored against
+    (D-03). Used only by the write endpoints (POST/DELETE) below -- the
+    summary read no longer consults it at all, since a group's target now
+    applies uniformly to every month regardless of when it was set.
     Deliberately derived from `date.today()`, never from the `year` query
-    parameter of the summary endpoint below -- the year dropdown only
-    changes what's being VIEWED, not when a new target takes effect."""
+    parameter of the summary endpoint -- the year dropdown only changes
+    what's being VIEWED, not what month a write is recorded against."""
     return date.today().replace(day=1)
 
 
@@ -30,8 +33,8 @@ async def budget_summary(
     all_groups = await group_repo.list_with_categories()
 
     target_repo = CategoryGroupTargetRepository(db)
-    targets_by_group = await target_repo.effective_targets_for_year(year)
-    current_by_group = await target_repo.effective_targets_at(_current_month_start())
+    targets_by_group = await target_repo.current_targets_by_month()
+    current_by_group = await target_repo.current_targets()
 
     spending: dict[str, dict[str, dict[int, Decimal]]] = {}
     for row in rows:
@@ -104,7 +107,9 @@ async def budget_summary(
 @router.post("/group-targets")
 async def set_group_target(body: dict, db: AsyncSession = Depends(get_db)):
     """Upserts the target for the current real-world month (D-03) -- never
-    the year being viewed on the summary page."""
+    the year being viewed on the summary page. The stored amount then
+    applies to every month the summary shows, past and future, until
+    changed or cleared."""
     group_repo = CategoryGroupRepository(db)
     group = await group_repo.get(body.get("group_id"))
     if not group:
@@ -136,9 +141,10 @@ async def set_group_target(body: dict, db: AsyncSession = Depends(get_db)):
 @router.delete("/group-targets/{group_id}")
 async def clear_group_target(group_id: int, db: AsyncSession = Depends(get_db)):
     """Clears a group's target by writing a NULL-amount row for the current
-    real-world month (D-05) rather than deleting rows -- months before this
-    one keep whatever target was active then; only this month onward goes
-    back to "no target"."""
+    real-world month (D-05) rather than deleting rows -- deleting would
+    resurrect whatever target preceded it. Writing a null row for the
+    current month makes it the group's latest row, so no month shows a
+    target (past or future) until a new one is set."""
     group_repo = CategoryGroupRepository(db)
     group = await group_repo.get(group_id)
     if not group:

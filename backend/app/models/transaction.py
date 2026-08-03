@@ -69,23 +69,23 @@ class Transaction(Base):
 
 
 class CategoryGroupTarget(Base):
-    """A recurring, effective-dated monthly spending ceiling for one main
-    category (CategoryGroup) -- phase 1 of Budget Targets. Sub-category
-    targets are deliberately out of scope (deferred to a later phase).
+    """A single monthly spending ceiling for one main category
+    (CategoryGroup) -- phase 1 of Budget Targets. Sub-category targets are
+    deliberately out of scope (deferred to a later phase).
+
+    Targets are absolute, not effective-dated: whichever row was most
+    recently written for a group is its current target, and that value
+    applies to every month shown -- past, present, and future -- until
+    changed or cleared. There is no per-month/date-gated lookup.
 
     `amount` is nullable: a NULL row means the target was explicitly
-    cleared as of `effective_month` onward, rather than absent -- deleting
-    a row would resurrect whatever target preceded it, which is the
-    opposite of what "clear" means here.
+    cleared, rather than absent -- deleting a row would resurrect whatever
+    target preceded it, which is the opposite of what "clear" means here.
 
-    `effective_month` is always the first day of a month and marks the
-    point from which this row's `amount` applies -- it is a month-START
-    marker, not "the one month this target applies to". A lookup for a
-    given (group, year, month) means: among all of this group's rows
-    (across every year), find the one with the greatest `effective_month`
-    that is `<=` the month being rendered. That row's amount (possibly
-    NULL) is the effective target for that month and every later month,
-    until a newer row supersedes it.
+    `effective_month` is always the first day of a month and records which
+    month the row was written against -- it is retained as storage
+    groundwork for a possible future per-month/versioned read mode, but is
+    not consulted when resolving which target currently applies.
     """
 
     __tablename__ = "category_group_targets"

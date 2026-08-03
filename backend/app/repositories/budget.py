@@ -7,22 +7,16 @@ from app.models import CategoryGroupTarget
 from app.repositories.base import BaseRepository
 
 
-def _latest_at(rows: list[CategoryGroupTarget], at: date) -> CategoryGroupTarget | None:
+def _latest(rows: list[CategoryGroupTarget]) -> CategoryGroupTarget | None:
     """Given ROWS pre-sorted ascending by `effective_month`, returns the
-    last row whose `effective_month <= at`, or None if none qualify.
-
-    This is the single fold both `effective_targets_for_year` and
-    `effective_targets_at` build on, so the "greatest effective_month <=
-    the month being rendered" rule (see `CategoryGroupTarget`'s docstring)
-    has exactly one implementation.
+    single overall-latest row -- the group's current target, full stop, no
+    date comparison against a rendered month. `rows[-1]` when non-empty,
+    otherwise `None`. The unique constraint on `(group_id, effective_month)`
+    guarantees there is never a tie for "latest". `effective_month` is kept
+    on the row for a possible future per-month/versioned read mode -- it is
+    not consulted here.
     """
-    latest: CategoryGroupTarget | None = None
-    for row in rows:
-        if row.effective_month <= at:
-            latest = row
-        else:
-            break
-    return latest
+    return rows[-1] if rows else None
 
 
 class CategoryGroupTargetRepository(BaseRepository[CategoryGroupTarget]):
@@ -30,10 +24,10 @@ class CategoryGroupTargetRepository(BaseRepository[CategoryGroupTarget]):
 
     async def list_all(self) -> list[CategoryGroupTarget]:
         """Every row, ordered by group then effective_month. The table has
-        at most a handful of rows per group, so the effective-dating fold
-        happens in Python (via `_latest_at`) rather than as a correlated
-        SQL subquery -- this also sidesteps the SQLite-vs-Postgres
-        date-typing divergences already documented in TransactionRepository.
+        at most a handful of rows per group, so resolving "the latest row"
+        happens in Python (via `_latest`) rather than as a correlated SQL
+        subquery -- this also sidesteps the SQLite-vs-Postgres date-typing
+        divergences already documented in TransactionRepository.
         """
         result = await self.db.execute(
             select(CategoryGroupTarget).order_by(
@@ -41,6 +35,16 @@ class CategoryGroupTargetRepository(BaseRepository[CategoryGroupTarget]):
             )
         )
         return list(result.scalars().all())
+
+    def _by_group(
+        self, rows: list[CategoryGroupTarget]
+    ) -> dict[int, list[CategoryGroupTarget]]:
+        """Buckets `list_all()` output into `{group_id: [rows...]}` --
+        shared by both read methods below."""
+        by_group: dict[int, list[CategoryGroupTarget]] = {}
+        for row in rows:
+            by_group.setdefault(row.group_id, []).append(row)
+        return by_group
 
     async def get_by_group_and_month(
         self, *, group_id: int, effective_month: date
@@ -72,33 +76,26 @@ class CategoryGroupTargetRepository(BaseRepository[CategoryGroupTarget]):
             )
         )
 
-    async def effective_targets_for_year(self, year: int) -> dict[int, dict[int, Decimal | None]]:
+    async def current_targets_by_month(self) -> dict[int, dict[int, Decimal | None]]:
         """`{group_id: {1..12: Decimal | None}}` over every group that has
-        at least one row, applying the effective-dating rule."""
-        rows = await self.list_all()
-        by_group: dict[int, list[CategoryGroupTarget]] = {}
-        for row in rows:
-            by_group.setdefault(row.group_id, []).append(row)
+        at least one row. Each group's newest row is its target -- the same
+        value is assigned to all 12 months; there is no per-month split."""
+        by_group = self._by_group(await self.list_all())
 
         result: dict[int, dict[int, Decimal | None]] = {}
         for group_id, group_rows in by_group.items():
-            months: dict[int, Decimal | None] = {}
-            for month in range(1, 13):
-                latest = _latest_at(group_rows, date(year, month, 1))
-                months[month] = latest.amount if latest is not None else None
-            result[group_id] = months
+            latest = _latest(group_rows)
+            amount = latest.amount if latest is not None else None
+            result[group_id] = {month: amount for month in range(1, 13)}
         return result
 
-    async def effective_targets_at(self, on_month: date) -> dict[int, Decimal | None]:
-        """The effective amount per group at a single month-start, used for
-        `current_target`."""
-        rows = await self.list_all()
-        by_group: dict[int, list[CategoryGroupTarget]] = {}
-        for row in rows:
-            by_group.setdefault(row.group_id, []).append(row)
+    async def current_targets(self) -> dict[int, Decimal | None]:
+        """The single current amount per group (each group's newest row),
+        used for `current_target`."""
+        by_group = self._by_group(await self.list_all())
 
         return {
-            group_id: (latest.amount if (latest := _latest_at(group_rows, on_month)) is not None else None)
+            group_id: (latest.amount if (latest := _latest(group_rows)) is not None else None)
             for group_id, group_rows in by_group.items()
         }
 
