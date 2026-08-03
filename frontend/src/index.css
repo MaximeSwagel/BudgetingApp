@@ -560,6 +560,39 @@ tbody tr:hover {
   border-top: 1px solid var(--color-border-strong);
 }
 
+/* Target-vs-actual colouring on .group-total cells only (D-11). These
+   REPLACE .amount-negative on a targeted cell rather than stacking with
+   it -- a cell with no effective target keeps .amount-negative exactly as
+   before, so there is no red-vs-blue specificity fight. */
+.budget-under {
+  color: var(--color-info);
+  font-variant-numeric: tabular-nums;
+}
+
+.budget-over {
+  color: var(--color-danger);
+  font-weight: var(--weight-bold);
+  font-variant-numeric: tabular-nums;
+}
+
+.group-target {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: normal;
+  font-size: var(--text-sm);
+}
+
+.group-target-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.group-target-input {
+  max-width: 110px;
+}
+
 .grand-total td {
   font-weight: var(--weight-bold);
   background: var(--color-nav-bg);

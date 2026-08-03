@@ -32,8 +32,46 @@ export async function getCategories() {
   return res.json();
 }
 
-export async function getBudgetSummary(year: number) {
+export interface BudgetCategoryData {
+  name: string;
+  category_id: number;
+  months: Record<string, string>;
+  annual_total: string;
+}
+
+export interface BudgetGroupData {
+  group: string;
+  group_id: number;
+  categories: BudgetCategoryData[];
+  monthly_totals: Record<string, string>;
+  annual_total: string;
+  targets: Record<string, string | null>;
+  current_target: string | null;
+}
+
+export interface BudgetSummary {
+  year: number;
+  groups: BudgetGroupData[];
+  total_expense_monthly: Record<string, string>;
+  total_expense_annual: string;
+}
+
+export async function getBudgetSummary(year: number): Promise<BudgetSummary> {
   const res = await fetch(`${BASE}/budget/summary?year=${year}`);
+  return res.json();
+}
+
+export async function setGroupTarget(groupId: number, amount: string) {
+  const res = await fetch(`${BASE}/budget/group-targets`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ group_id: groupId, amount }),
+  });
+  return res.json();
+}
+
+export async function clearGroupTarget(groupId: number) {
+  const res = await fetch(`${BASE}/budget/group-targets/${groupId}`, { method: "DELETE" });
   return res.json();
 }
 
