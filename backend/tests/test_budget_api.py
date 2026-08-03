@@ -205,3 +205,107 @@ async def test_targets_are_group_level_only(client):
     for group in summary.json()["groups"]:
         for cat in group["categories"]:
             assert "targets" not in cat
+
+
+def _months_back(offset: int) -> date:
+    """The month-start `offset` full calendar months before the current
+    real-world month (1 = last completed month, 3 = three months back)."""
+    today = date.today()
+    year, month = today.year, today.month
+    for _ in range(offset):
+        month -= 1
+        if month == 0:
+            month = 12
+            year -= 1
+    return date(year, month, 1)
+
+
+def _expense_csv(day: date, description: str, amount: str) -> str:
+    return (
+        "Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance\n"
+        f"CARD_PAYMENT,Current,{day.isoformat()} 10:00:00,{day.isoformat()} 10:00:01,"
+        f"{description},{amount},0,ILS,COMPLETED,100.00\n"
+    )
+
+
+@pytest.mark.asyncio
+async def test_suggested_target_averages_last_three_active_months(client):
+    for offset, amount in ((1, "-300.00"), (2, "-300.00"), (3, "-300.00")):
+        await client.post(
+            "/api/upload",
+            files={"file": ("m.csv", io.BytesIO(_expense_csv(_months_back(offset), "Tesco", amount).encode()), "text/csv")},
+        )
+    categories_resp = await client.get("/api/categories")
+    group_id = categories_resp.json()[0]["id"]
+    first_category_id = categories_resp.json()[0]["categories"][0]["id"]
+    await _categorize_all(client, first_category_id)
+
+    summary = await client.get("/api/budget/summary", params={"year": date.today().year})
+    group = next(g for g in summary.json()["groups"] if g["group_id"] == group_id)
+
+    assert group["current_target"] is None
+    assert group["suggested_target"] == "300.00"
+
+
+@pytest.mark.asyncio
+async def test_suggested_target_is_null_once_a_target_is_set(client):
+    await client.post(
+        "/api/upload",
+        files={"file": ("m.csv", io.BytesIO(_expense_csv(_months_back(1), "Tesco", "-300.00").encode()), "text/csv")},
+    )
+    categories_resp = await client.get("/api/categories")
+    group_id = categories_resp.json()[0]["id"]
+    first_category_id = categories_resp.json()[0]["categories"][0]["id"]
+    await _categorize_all(client, first_category_id)
+
+    await client.post("/api/budget/group-targets", json={"group_id": group_id, "amount": "500.00"})
+
+    summary = await client.get("/api/budget/summary", params={"year": date.today().year})
+    group = next(g for g in summary.json()["groups"] if g["group_id"] == group_id)
+
+    assert group["current_target"] == "500.00"
+    assert group["suggested_target"] is None
+
+
+@pytest.mark.asyncio
+async def test_suggested_target_divides_by_active_months_not_just_this_groups_months(client):
+    categories_resp = await client.get("/api/categories")
+    first_group = categories_resp.json()[0]
+    second_group = categories_resp.json()[1]
+    quiet_group_id = first_group["id"]
+    quiet_category_id = first_group["categories"][0]["id"]
+    active_category_id = second_group["categories"][0]["id"]
+
+    # `quiet_group` only has spend in one of the three trailing months --
+    # the other two months are made "active" by an unrelated group, so the
+    # divisor stays 3 and the quiet group's average is pulled down to 100,
+    # not 300 (which is what it would be if only its own active months counted).
+    await client.post(
+        "/api/upload",
+        files={"file": ("m.csv", io.BytesIO(_expense_csv(_months_back(1), "Tesco", "-300.00").encode()), "text/csv")},
+    )
+    await client.post(
+        "/api/upload",
+        files={"file": ("m2.csv", io.BytesIO(_expense_csv(_months_back(2), "Other", "-50.00").encode()), "text/csv")},
+    )
+    await client.post(
+        "/api/upload",
+        files={"file": ("m3.csv", io.BytesIO(_expense_csv(_months_back(3), "Other", "-50.00").encode()), "text/csv")},
+    )
+
+    txns = (await client.get("/api/transactions", params={"uncategorized": "true", "page_size": "200"})).json()
+    for t in txns["transactions"]:
+        category_id = quiet_category_id if t["description"] == "Tesco" else active_category_id
+        await client.patch(f"/api/transactions/{t['id']}/category", json={"category_id": category_id})
+
+    summary = await client.get("/api/budget/summary", params={"year": date.today().year})
+    quiet_group = next(g for g in summary.json()["groups"] if g["group_id"] == quiet_group_id)
+
+    assert quiet_group["suggested_target"] == "100.00"
+
+
+@pytest.mark.asyncio
+async def test_suggested_target_is_null_with_no_recent_data(client):
+    summary = await client.get("/api/budget/summary", params={"year": date.today().year})
+    for group in summary.json()["groups"]:
+        assert group["suggested_target"] is None
