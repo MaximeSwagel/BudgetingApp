@@ -34,7 +34,6 @@ export default function BudgetPage() {
   );
   const currentMonthIdx = year === now.getFullYear() ? now.getMonth() : -1;
   const monthClass = (i: number) => (i === currentMonthIdx ? "current-month" : "");
-  const targetAppliesFromLabel = `${now.toLocaleString(undefined, { month: "long" })} ${now.getFullYear()}`;
 
   const loadBudget = useCallback(async () => {
     const result = await getBudgetSummary(year);
@@ -152,7 +151,7 @@ export default function BudgetPage() {
   const handleClearTarget = async (group: BudgetGroupData) => {
     if (
       !window.confirm(
-        `Clear the target for "${group.group}"? Months from this month onward will show no target; earlier months keep the target they had.`
+        `Clear the target for "${group.group}"? No month will show a target until you set a new one.`
       )
     ) {
       return;
@@ -267,7 +266,7 @@ export default function BudgetPage() {
                               step="1"
                               className="inline-add-input group-target-input"
                               aria-label={`Monthly target for ${group.group}`}
-                              title={`Applies from ${targetAppliesFromLabel} onward`}
+                              title="Applies to every month shown, past and future, until changed"
                               value={targetDrafts[group.group_id] ?? group.current_target ?? ""}
                               onChange={(e) =>
                                 setTargetDrafts((prev) => ({
@@ -307,7 +306,7 @@ export default function BudgetPage() {
                         ) : (
                           <span
                             className="group-target"
-                            title={`Applies from ${targetAppliesFromLabel} onward`}
+                            title="Applies to every month shown, past and future, until changed"
                           >
                             Target:{" "}
                             {group.current_target !== null
