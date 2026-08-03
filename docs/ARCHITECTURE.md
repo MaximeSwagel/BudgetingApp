@@ -109,7 +109,10 @@ A typical CSV import request flows through the system as follows:
    current target (`CategoryGroupTarget`, set/cleared via `POST`/`DELETE
    /api/budget/group-targets`), producing the nested group → category → month structure the frontend
    renders as a spreadsheet-style table, plus a per-group `targets`/`current_target` pair used to colour
-   the group-total row.
+   the group-total row. For a group with no target yet, the same endpoint also computes
+   `suggested_target` -- the average expense magnitude over the last 3 completed calendar months
+   (`group_totals_for_month` called once per window month) -- which the frontend can apply with a single
+   click via the same `POST /api/budget/group-targets` call.
 
 ## Key Abstractions
 

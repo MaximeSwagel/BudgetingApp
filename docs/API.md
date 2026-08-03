@@ -26,7 +26,7 @@ requests from any origin permitted by CORS. `backend/app/main.py` configures COR
 | POST | `/api/categories/groups` | Create a new category group | No |
 | POST | `/api/categories` | Create a new category within a group | No |
 | PUT | `/api/categories/{category_id}` | Update a category's name or group | No |
-| GET | `/api/budget/summary` | Monthly/annual spending summary by category, matched against per-group budget targets | No |
+| GET | `/api/budget/summary` | Monthly/annual spending summary by category, matched against per-group budget targets (plus an auto-proposed target for groups with none) | No |
 | POST | `/api/budget/group-targets` | Set a primary category's target (applies to every month until changed) | No |
 | DELETE | `/api/budget/group-targets/{group_id}` | Clear a primary category's target for every month | No |
 
@@ -224,7 +224,8 @@ current target (`CategoryGroupTarget`). Response shape:
       "monthly_totals": { "1": "12500.00", "...": "0.00" },
       "annual_total": "150000.00",
       "targets": { "1": "12000.00", "2": null, "...": null },
-      "current_target": "12000.00"
+      "current_target": "12000.00",
+      "suggested_target": null
     }
   ],
   "total_expense_monthly": { "1": "45000.00", "...": "0.00" },
@@ -237,6 +238,13 @@ objects carry no `targets` key -- phase 1 of Budget Targets is group-level only.
 carries the same current target for all 12 months of the queried `year` (string amount, or `null` when
 the group has no target), and is identical whichever `year` is requested; `current_target` is that same
 value.
+
+`suggested_target` is an auto-proposed starting point for groups that have no target yet: the average
+expense magnitude across the last 3 completed calendar months (not the queried `year`, and not including
+the current in-progress month), rounded to a whole unit. It is `null` whenever `current_target` is
+already set, or when there's no expense activity anywhere in that 3-month window to base a suggestion on.
+The client applies it by calling `POST /api/budget/group-targets` with that value, exactly as if the user
+had typed it in.
 
 ### `POST /api/budget/group-targets`
 
