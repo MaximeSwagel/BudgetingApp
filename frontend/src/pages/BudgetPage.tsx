@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   clearGroupTarget,
   createCategory,
@@ -209,6 +210,9 @@ export default function BudgetPage() {
             <Button variant="secondary" onClick={handleExport}>
               Export to Excel
             </Button>
+            <Link to="/budget/targets" className="btn btn-secondary">
+              Target analysis
+            </Link>
             <Button variant="secondary" onClick={() => setEditMode((v) => !v)}>
               {editMode ? "Done" : "Edit"}
             </Button>
@@ -253,7 +257,7 @@ export default function BudgetPage() {
               </tr>
 
               {data.groups.map((group) => (
-                <>
+                <Fragment key={group.group_id}>
                   <tr key={`header-${group.group}`} className="group-header">
                     <td colSpan={14}>
                       <div className="group-header-row">
@@ -428,7 +432,7 @@ export default function BudgetPage() {
                     })()}
                     <td>{pct(group.annual_total, data.total_expense_annual)}</td>
                   </tr>
-                </>
+                </Fragment>
               ))}
 
               <tr className="grand-total">

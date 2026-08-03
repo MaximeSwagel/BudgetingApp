@@ -52,6 +52,7 @@ export interface BudgetGroupData {
 
 export interface BudgetSummary {
   year: number;
+  base_currency: string;
   groups: BudgetGroupData[];
   total_expense_monthly: Record<string, string>;
   total_expense_annual: string;
