@@ -345,15 +345,30 @@ export default function BudgetPage() {
                       </td>
                       {MONTHS.map((_, i) => {
                         const monthVal = cat.months[String(i + 1)];
+                        const status = targetStatus(monthVal, group.targets?.[String(i + 1)]);
                         return (
-                          <td key={i} className={`amount-negative ${monthClass(i)}`}>
+                          <td
+                            key={i}
+                            className={`${status ? `budget-${status}` : "amount-negative"} ${monthClass(i)}`}
+                          >
                             {fmt(monthVal)}
                           </td>
                         );
                       })}
-                      <td className="amount-negative">
-                        {fmt(cat.annual_total)}
-                      </td>
+                      {(() => {
+                        const annual = annualTargetComparison(cat.months, group.targets ?? {});
+                        const annualClass = annual ? `budget-${annual.status}` : "amount-negative";
+                        const annualTitle = annual
+                          ? `Target ${formatTargetAmount(String(annual.targetSum))} vs ${formatTargetAmount(
+                              String(annual.actualSum)
+                            )} actual across the months that have a target`
+                          : undefined;
+                        return (
+                          <td className={annualClass} title={annualTitle}>
+                            {fmt(cat.annual_total)}
+                          </td>
+                        );
+                      })()}
                       <td>{pct(cat.annual_total, data.total_expense_annual)}</td>
                     </tr>
                   ))}

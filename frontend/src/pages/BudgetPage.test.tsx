@@ -242,7 +242,7 @@ describe("BudgetPage", () => {
     expect(container.querySelector(".group-total .amount-negative")).toBeInTheDocument();
   });
 
-  it("never colours subcategory rows or the grand total", async () => {
+  it("never colours the grand total", async () => {
     const summary = makeSummary({
       monthlyTotals: { "1": "-100.00" },
       targets: { ...nullTargetsMap(), "1": "50.00" },
@@ -253,9 +253,83 @@ describe("BudgetPage", () => {
     await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
 
     expect(container.querySelector(".grand-total .budget-over")).not.toBeInTheDocument();
+    expect(container.querySelector(".grand-total .budget-under")).not.toBeInTheDocument();
+  });
+
+  it("colours a sub-category row's monthly cell blue when actual is at/under the parent group's target", async () => {
+    const summary = makeSummary({
+      monthlyTotals: { "1": "-50.00" },
+      targets: { ...nullTargetsMap(), "1": "100.00" },
+    });
+    summary.groups[0].categories[0].months = { "1": "-50.00" };
+    summary.groups[0].categories[0].annual_total = "-50.00";
+    vi.mocked(api.getBudgetSummary).mockResolvedValue(summary);
+
+    render(<BudgetPage />);
+    await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
+
     const subRow = screen.getByText("Groceries").closest("tr");
-    expect(subRow?.querySelector(".budget-over")).not.toBeInTheDocument();
-    expect(subRow?.querySelector(".budget-under")).not.toBeInTheDocument();
+    // Month-1 cell is the 2nd <td> in the row (index 0 is the category-name cell).
+    const month1Cell = subRow?.children[1] as HTMLElement;
+    expect(month1Cell.className).toContain("budget-under");
+    expect(month1Cell.className).not.toContain("amount-negative");
+  });
+
+  it("colours a sub-category row's monthly cell red when actual exceeds the parent group's target", async () => {
+    const summary = makeSummary({
+      monthlyTotals: { "1": "-50.00" },
+      targets: { ...nullTargetsMap(), "1": "20.00" },
+    });
+    summary.groups[0].categories[0].months = { "1": "-50.00" };
+    summary.groups[0].categories[0].annual_total = "-50.00";
+    vi.mocked(api.getBudgetSummary).mockResolvedValue(summary);
+
+    render(<BudgetPage />);
+    await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
+
+    const subRow = screen.getByText("Groceries").closest("tr");
+    const month1Cell = subRow?.children[1] as HTMLElement;
+    expect(month1Cell.className).toContain("budget-over");
+    expect(month1Cell.className).not.toContain("amount-negative");
+  });
+
+  it("leaves a sub-category row uncoloured when the group has no target for that month", async () => {
+    const summary = makeSummary({
+      monthlyTotals: { "1": "-50.00" },
+      targets: nullTargetsMap(),
+    });
+    summary.groups[0].categories[0].months = { "1": "-50.00" };
+    summary.groups[0].categories[0].annual_total = "-50.00";
+    vi.mocked(api.getBudgetSummary).mockResolvedValue(summary);
+
+    render(<BudgetPage />);
+    await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
+
+    const subRow = screen.getByText("Groceries").closest("tr");
+    const month1Cell = subRow?.children[1] as HTMLElement;
+    expect(month1Cell.className).toContain("amount-negative");
+    expect(month1Cell.className).not.toContain("budget-under");
+    expect(month1Cell.className).not.toContain("budget-over");
+  });
+
+  it("colours a sub-category's annual total cell using annualTargetComparison against the group's targets", async () => {
+    const summary = makeSummary({
+      targets: { ...nullTargetsMap(), "1": "20.00", "2": "20.00" },
+    });
+    summary.groups[0].categories[0].months = { "1": "-50.00", "2": "-10.00" };
+    summary.groups[0].categories[0].annual_total = "-60.00";
+    summary.groups[0].monthly_totals = { "1": "-50.00", "2": "-10.00" };
+    summary.groups[0].annual_total = "-60.00";
+    vi.mocked(api.getBudgetSummary).mockResolvedValue(summary);
+
+    render(<BudgetPage />);
+    await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
+
+    const subRow = screen.getByText("Groceries").closest("tr");
+    // Annual total cell is the 14th <td> (index 0 = name, 1-12 = months, 13 = annual total).
+    const annualCell = subRow?.children[13] as HTMLElement;
+    // targetSum = 20 + 20 = 40, actualSum = 50 + 10 = 60 -> over
+    expect(annualCell.className).toContain("budget-over");
   });
 
   it("shows the current target read-only when not in edit mode", async () => {
