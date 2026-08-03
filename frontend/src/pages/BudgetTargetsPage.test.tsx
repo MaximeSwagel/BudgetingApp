@@ -46,6 +46,7 @@ const HOUSEHOLD = {
   annual_total: "-400.00",
   targets: { "1": "150.00", "2": "150.00" },
   current_target: "150.00",
+  suggested_target: null,
 };
 
 const DISCRETIONARY = {
@@ -56,6 +57,7 @@ const DISCRETIONARY = {
   annual_total: "-70.00",
   targets: { "1": "50.00", "2": "50.00" },
   current_target: "50.00",
+  suggested_target: null,
 };
 
 const SAVINGS_NO_TARGET = {
@@ -66,6 +68,7 @@ const SAVINGS_NO_TARGET = {
   annual_total: "-1000.00",
   targets: {},
   current_target: null,
+  suggested_target: null,
 };
 
 function renderPage() {

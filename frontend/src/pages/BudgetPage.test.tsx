@@ -419,7 +419,7 @@ describe("BudgetPage", () => {
     const summary = makeSummary({ suggestedTarget: "300.00" });
     vi.mocked(api.getBudgetSummary).mockResolvedValue(summary);
 
-    render(<BudgetPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
 
     expect(screen.getByText(/suggested 300\/mo/)).toBeInTheDocument();
@@ -429,7 +429,7 @@ describe("BudgetPage", () => {
     const summary = makeSummary({ currentTarget: "2000.00", suggestedTarget: "300.00" });
     vi.mocked(api.getBudgetSummary).mockResolvedValue(summary);
 
-    render(<BudgetPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
 
     expect(screen.queryByText(/suggested/)).not.toBeInTheDocument();
@@ -440,7 +440,7 @@ describe("BudgetPage", () => {
     vi.mocked(api.getBudgetSummary).mockResolvedValue(summary);
     vi.mocked(api.setGroupTarget).mockResolvedValue({ ok: true });
 
-    render(<BudgetPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
@@ -454,7 +454,7 @@ describe("BudgetPage", () => {
     const summary = makeSummary({ currentTarget: "2000.00", suggestedTarget: "300.00" });
     vi.mocked(api.getBudgetSummary).mockResolvedValue(summary);
 
-    render(<BudgetPage />);
+    renderPage();
     await waitFor(() => expect(screen.getByText("Groceries")).toBeInTheDocument());
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
 
