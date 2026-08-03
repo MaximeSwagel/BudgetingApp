@@ -3,7 +3,7 @@ import io
 import pytest
 from sqlalchemy import select
 
-from app.models import CategoryCorrection
+from app.models import CategoryCorrection, CategoryGroupTarget
 
 JAN_EXPENSE_CSV = (
     "Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance\n"
@@ -89,18 +89,12 @@ async def test_delete_subcategory_with_transactions_blocked_409(client):
 
 
 @pytest.mark.asyncio
-async def test_delete_subcategory_cleans_budget_targets_and_corrections(client, db_session):
+async def test_delete_subcategory_cleans_corrections(client, db_session):
     categories = (await client.get("/api/categories")).json()
     group_id = categories[0]["id"]
 
     cat = (await client.post("/api/categories", json={"name": "Temp Sub", "group_id": group_id})).json()
     cat_id = cat["id"]
-
-    target_resp = await client.post(
-        "/api/budget/targets",
-        json={"category_id": cat_id, "year": 2026, "month": 1, "amount": "50.00"},
-    )
-    assert target_resp.json()["ok"] is True
 
     async with db_session() as session:
         session.add(
@@ -154,6 +148,26 @@ async def test_delete_empty_group(client):
 
     categories_after = (await client.get("/api/categories")).json()
     assert not any(g["name"] == "Empty Group" for g in categories_after)
+
+
+@pytest.mark.asyncio
+async def test_delete_group_cleans_group_targets(client, db_session):
+    group = (await client.post("/api/categories/groups", json={"name": "Temp Group"})).json()
+    group_id = group["id"]
+
+    target_resp = await client.post(
+        "/api/budget/group-targets", json={"group_id": group_id, "amount": "100.00"}
+    )
+    assert target_resp.json()["ok"] is True
+
+    del_resp = await client.delete(f"/api/categories/groups/{group_id}")
+    assert del_resp.status_code == 200
+
+    async with db_session() as session:
+        result = await session.execute(
+            select(CategoryGroupTarget).where(CategoryGroupTarget.group_id == group_id)
+        )
+        assert result.scalars().all() == []
 
 
 @pytest.mark.asyncio

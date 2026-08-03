@@ -113,7 +113,8 @@ The backend exposes a REST API under `/api`:
 | `POST` | `/api/categories` | Create a new category within a group |
 | `PUT` | `/api/categories/{id}` | Rename a category or move it to a different group |
 | `GET` | `/api/budget/summary` | Monthly budget summary by category group/category for a given year, with annual totals |
-| `POST` | `/api/budget/targets` | Set a budget target amount for a category/year/month |
+| `POST` | `/api/budget/group-targets` | Set a primary category's recurring target, effective from the current month onward |
+| `DELETE` | `/api/budget/group-targets/{group_id}` | Clear a primary category's target from the current month onward |
 | `GET` | `/api/health` | Health check |
 
 Supported bank CSV formats (auto-detected from the header row): Revolut (French), Revolut (English), and Crédit Agricole. Merged multi-currency Revolut exports are not supported — upload per-currency account statements instead.
@@ -127,7 +128,7 @@ BudgetingApp/
 │   │   ├── main.py          # FastAPI app, category seeding, health check
 │   │   ├── config.py        # Settings (database URL, OpenAI key, base currency)
 │   │   ├── database.py      # Async SQLAlchemy engine/session
-│   │   ├── models/          # Transaction, Category, CategoryGroup, BudgetTarget, ImportBatch
+│   │   ├── models/          # Transaction, Category, CategoryGroup, CategoryGroupTarget, ImportBatch
 │   │   ├── parsers/         # Bank format detection + CSV parsers (Revolut FR/EN, Crédit Agricole)
 │   │   ├── routers/         # upload, transactions, categories, budget endpoints
 │   │   └── services/        # categorizer.py (OpenAI), currency.py (conversion)

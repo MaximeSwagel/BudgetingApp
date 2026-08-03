@@ -1,6 +1,11 @@
 import io
+from datetime import date
+from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
+
+from app.models import CategoryGroupTarget
 
 JAN_EXPENSE_CSV = (
     "Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance\n"
@@ -59,23 +64,131 @@ async def test_budget_summary_filters_by_year(client):
 
 
 @pytest.mark.asyncio
-async def test_set_and_read_budget_target(client):
+async def test_summary_has_no_target_when_none_set(client):
+    summary = await client.get("/api/budget/summary", params={"year": 2026})
+    groups = summary.json()["groups"]
+    assert len(groups) > 0
+    for group in groups:
+        assert group["current_target"] is None
+        assert all(group["targets"].get(str(m)) is None for m in range(1, 13))
+
+
+@pytest.mark.asyncio
+async def test_set_group_target_applies_from_current_month(client):
     categories_resp = await client.get("/api/categories")
-    first_category_id = categories_resp.json()[0]["categories"][0]["id"]
+    group_id = categories_resp.json()[0]["id"]
 
     resp = await client.post(
-        "/api/budget/targets",
-        json={"category_id": first_category_id, "year": 2026, "month": 1, "amount": "100.00"},
+        "/api/budget/group-targets", json={"group_id": group_id, "amount": "2000.00"}
     )
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
 
-    summary = await client.get("/api/budget/summary", params={"year": 2026})
+    today = date.today()
+    summary = await client.get("/api/budget/summary", params={"year": today.year})
     groups = summary.json()["groups"]
-    target_found = any(
-        cat["targets"].get("1") == "100.00"
-        for group in groups
-        for cat in group["categories"]
-        if cat["category_id"] == first_category_id
+    group = next(g for g in groups if g["group_id"] == group_id)
+
+    assert group["current_target"] == "2000.00"
+    assert group["targets"][str(today.month)] == "2000.00"
+
+    if today.month > 1:
+        assert group["targets"][str(today.month - 1)] is None
+
+
+@pytest.mark.asyncio
+async def test_setting_target_twice_in_same_month_updates_one_row(client, db_session):
+    categories_resp = await client.get("/api/categories")
+    group_id = categories_resp.json()[0]["id"]
+
+    await client.post("/api/budget/group-targets", json={"group_id": group_id, "amount": "2000.00"})
+    resp = await client.post(
+        "/api/budget/group-targets", json={"group_id": group_id, "amount": "2500.00"}
     )
-    assert target_found
+    assert resp.status_code == 200
+
+    today = date.today()
+    summary = await client.get("/api/budget/summary", params={"year": today.year})
+    group = next(g for g in summary.json()["groups"] if g["group_id"] == group_id)
+    assert group["current_target"] == "2500.00"
+
+    async with db_session() as session:
+        result = await session.execute(
+            select(CategoryGroupTarget).where(CategoryGroupTarget.group_id == group_id)
+        )
+        rows = result.scalars().all()
+        assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_effective_target_carries_forward_and_is_superseded(client, db_session):
+    categories_resp = await client.get("/api/categories")
+    group_id = categories_resp.json()[0]["id"]
+
+    async with db_session() as session:
+        session.add(
+            CategoryGroupTarget(
+                group_id=group_id, amount=Decimal("500.00"), effective_month=date(2026, 1, 1)
+            )
+        )
+        session.add(
+            CategoryGroupTarget(
+                group_id=group_id, amount=Decimal("800.00"), effective_month=date(2026, 6, 1)
+            )
+        )
+        await session.commit()
+
+    summary = await client.get("/api/budget/summary", params={"year": 2026})
+    group = next(g for g in summary.json()["groups"] if g["group_id"] == group_id)
+
+    for m in range(1, 6):
+        assert group["targets"][str(m)] == "500.00"
+    for m in range(6, 13):
+        assert group["targets"][str(m)] == "800.00"
+
+
+@pytest.mark.asyncio
+async def test_clear_group_target_clears_from_now_on(client):
+    categories_resp = await client.get("/api/categories")
+    group_id = categories_resp.json()[0]["id"]
+
+    await client.post("/api/budget/group-targets", json={"group_id": group_id, "amount": "2000.00"})
+    del_resp = await client.delete(f"/api/budget/group-targets/{group_id}")
+    assert del_resp.status_code == 200
+    assert del_resp.json()["ok"] is True
+
+    today = date.today()
+    summary = await client.get("/api/budget/summary", params={"year": today.year})
+    group = next(g for g in summary.json()["groups"] if g["group_id"] == group_id)
+
+    assert group["current_target"] is None
+    assert group["targets"][str(today.month)] is None
+
+
+@pytest.mark.asyncio
+async def test_group_target_validation(client):
+    categories_resp = await client.get("/api/categories")
+    group_id = categories_resp.json()[0]["id"]
+
+    missing_group = await client.post(
+        "/api/budget/group-targets", json={"group_id": 999999, "amount": "10.00"}
+    )
+    assert missing_group.status_code == 404
+
+    negative = await client.post(
+        "/api/budget/group-targets", json={"group_id": group_id, "amount": "-10.00"}
+    )
+    assert negative.status_code == 400
+
+    non_numeric = await client.post(
+        "/api/budget/group-targets", json={"group_id": group_id, "amount": "not-a-number"}
+    )
+    assert non_numeric.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_targets_are_group_level_only(client):
+    summary = await client.get("/api/budget/summary", params={"year": 2026})
+    for group in summary.json()["groups"]:
+        for cat in group["categories"]:
+            assert "targets" not in cat

@@ -26,8 +26,9 @@ requests from any origin permitted by CORS. `backend/app/main.py` configures COR
 | POST | `/api/categories/groups` | Create a new category group | No |
 | POST | `/api/categories` | Create a new category within a group | No |
 | PUT | `/api/categories/{category_id}` | Update a category's name or group | No |
-| GET | `/api/budget/summary` | Monthly/annual spending summary by category, matched against budget targets | No |
-| POST | `/api/budget/targets` | Create or update a budget target for a category/year/month | No |
+| GET | `/api/budget/summary` | Monthly/annual spending summary by category, matched against per-group budget targets | No |
+| POST | `/api/budget/group-targets` | Set a primary category's recurring target, effective from the current month onward | No |
+| DELETE | `/api/budget/group-targets/{group_id}` | Clear a primary category's target from the current month onward | No |
 
 Routes are defined in `backend/app/routers/upload.py`, `backend/app/routers/transactions.py`,
 `backend/app/routers/categories.py`, and `backend/app/routers/budget.py`, and registered in
@@ -202,8 +203,8 @@ Query parameters:
 | `year` | integer | `2026` | Year to summarize |
 
 Aggregates all non-duplicate expense transactions (`is_expense == true`) for the given year, grouped by
-month, category group, and category, and cross-references any `BudgetTarget` rows for that year. Response
-shape:
+month, category group, and category, and cross-references each primary category's (`CategoryGroup`)
+recurring, effective-dated target (`CategoryGroupTarget`). Response shape:
 
 ```json
 {
@@ -211,17 +212,19 @@ shape:
   "groups": [
     {
       "group": "Home Expenses",
+      "group_id": 1,
       "categories": [
         {
           "name": "Rent",
           "category_id": 1,
           "months": { "1": "12000.00", "2": "12000.00", "...": "0.00" },
-          "annual_total": "144000.00",
-          "targets": { "1": "12000.00" }
+          "annual_total": "144000.00"
         }
       ],
       "monthly_totals": { "1": "12500.00", "...": "0.00" },
-      "annual_total": "150000.00"
+      "annual_total": "150000.00",
+      "targets": { "1": "12000.00", "2": null, "...": null },
+      "current_target": "12000.00"
     }
   ],
   "total_expense_monthly": { "1": "45000.00", "...": "0.00" },
@@ -229,18 +232,32 @@ shape:
 }
 ```
 
-All monetary values are serialized as strings (`Decimal` → `str`) to preserve precision.
+All monetary values are serialized as strings (`Decimal` → `str`) to preserve precision. Sub-category
+objects carry no `targets` key -- phase 1 of Budget Targets is group-level only. A group's `targets` map
+gives the effective target for every month 1-12 of the queried `year` (string amount, or `null` when no
+target was in effect that month); `current_target` is the effective target for the real-world current
+month regardless of which `year` is being viewed.
 
-### `POST /api/budget/targets`
+### `POST /api/budget/group-targets`
 
 Request body:
 
 ```json
-{ "category_id": 1, "year": 2026, "month": 3, "amount": 12000.00 }
+{ "group_id": 1, "amount": 12000.00 }
 ```
 
-Creates a new `BudgetTarget` row, or updates the existing one for the same
-`(category_id, year, month)` combination (unique constraint `uq_budget_target`). Response: `{"ok": true}`.
+Upserts the target for `group_id`, effective from the current real-world calendar month onward (never
+the `year` being viewed elsewhere). Calling this again within the same month updates that same row in
+place rather than creating a new one; earlier months keep whatever target was active back then. Returns
+`{"ok": true, "group_id": 1, "amount": "12000.00", "effective_month": "2026-08-01"}`. 404 if `group_id`
+does not match a primary category; 400 if `amount` is missing/non-numeric or negative.
+
+### `DELETE /api/budget/group-targets/{group_id}`
+
+Clears `group_id`'s target from the current real-world month onward by writing a null-amount row for
+that month -- it does not delete any existing rows, so months before this one keep the target that was
+active then. Returns `{"ok": true, "group_id": 1, "effective_month": "2026-08-01"}`. 404 if `group_id`
+does not match a primary category.
 
 ## Error codes
 
