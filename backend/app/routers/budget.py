@@ -1,5 +1,5 @@
 from datetime import date
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,6 +8,64 @@ from app.database import get_db
 from app.repositories import CategoryGroupRepository, CategoryGroupTargetRepository, TransactionRepository
 
 router = APIRouter(prefix="/api/budget", tags=["budget"])
+
+SUGGESTION_WINDOW_MONTHS = 3
+
+
+def _recent_months(today: date, count: int = SUGGESTION_WINDOW_MONTHS) -> list[tuple[int, int]]:
+    """The `count` full calendar months immediately before the month
+    containing `today`, oldest first. Deliberately excludes the current,
+    still-in-progress month -- including a partial month would skew a
+    spending average low."""
+    months: list[tuple[int, int]] = []
+    year, month = today.year, today.month
+    for _ in range(count):
+        month -= 1
+        if month == 0:
+            month = 12
+            year -= 1
+        months.append((year, month))
+    months.reverse()
+    return months
+
+
+async def _suggested_targets(
+    txn_repo: TransactionRepository, name_to_group_id: dict[str, int]
+) -> dict[int, Decimal]:
+    """Auto-proposed target per group: average recent monthly expense
+    magnitude over the last SUGGESTION_WINDOW_MONTHS completed calendar
+    months, rounded to a whole unit. Reuses `group_totals_for_month`
+    (already used elsewhere) once per window month rather than adding a
+    new repository query.
+
+    The divisor is the count of window months that had ANY expense
+    activity across ALL groups, not just this group's own active months --
+    a group that was silent in an otherwise-active month should have that
+    silence pull its average down, not be excluded from the denominator
+    (which would inflate its suggestion toward months it happened to have
+    spend in).
+    """
+    totals: dict[int, Decimal] = {}
+    active_months = 0
+    for year, month in _recent_months(date.today()):
+        rows = await txn_repo.group_totals_for_month(year, month)
+        if rows:
+            active_months += 1
+        for row in rows:
+            group_id = name_to_group_id.get(row.group_name)
+            if group_id is None:
+                continue
+            totals[group_id] = totals.get(group_id, Decimal("0")) + abs(row.total or Decimal("0"))
+
+    if active_months == 0:
+        return {}
+
+    suggestions: dict[int, Decimal] = {}
+    for group_id, total in totals.items():
+        whole = (total / active_months).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        if whole > 0:
+            suggestions[group_id] = whole.quantize(Decimal("0.01"))
+    return suggestions
 
 
 def _current_month_start() -> date:
@@ -35,6 +93,9 @@ async def budget_summary(
     target_repo = CategoryGroupTargetRepository(db)
     targets_by_group = await target_repo.current_targets_by_month()
     current_by_group = await target_repo.current_targets()
+    suggested_by_group = await _suggested_targets(
+        txn_repo, {g.name: g.id for g in all_groups}
+    )
 
     spending: dict[str, dict[str, dict[int, Decimal]]] = {}
     for row in rows:
@@ -86,6 +147,12 @@ async def budget_summary(
         }
         current_target = current_by_group.get(group.id)
         group_data["current_target"] = str(current_target) if current_target is not None else None
+        # Only propose a suggestion when the group has no target yet (D-01
+        # of this plan) -- once a target exists the user has already made
+        # the call, and re-surfacing a computed number would read as a
+        # second opinion nobody asked for.
+        suggested_target = suggested_by_group.get(group.id) if current_target is None else None
+        group_data["suggested_target"] = str(suggested_target) if suggested_target is not None else None
         budget_data.append(group_data)
 
     total_expense_monthly: dict[int, Decimal] = {}
