@@ -23,7 +23,17 @@ from app.routers import (
 
 logging.basicConfig(level=logging.INFO)
 
-app = FastAPI(title="BudgetingApp API")
+# The production nginx config (frontend/nginx.conf) proxies only its `location /api/`
+# block to this backend; every other path falls through to the SPA catch-all and
+# serves index.html instead. Mounting the docs, redoc and schema routes under the
+# api prefix keeps them inside that proxied location so they render on the deployed
+# site instead of silently returning the frontend shell.
+app = FastAPI(
+    title="BudgetingApp API",
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
+)
 
 app.add_middleware(
     CORSMiddleware,
