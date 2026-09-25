@@ -10,16 +10,16 @@ from openai import AsyncOpenAI
 from app import agent_trace
 from app.config import settings
 from app.observability import elapsed_ms, log_event
-from app.services.agents.base import CATEGORY_HIERARCHY, UNCATEGORIZED, CategorizationAgent
+from app.services.agents.base import UNCATEGORIZED, CategorizationAgent, Taxonomy, assignable_groups
 
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 30
 
-ALL_CATEGORIES_TEXT = "\n".join(
-    f"- {group}: {', '.join(cats)}"
-    for group, cats in CATEGORY_HIERARCHY.items()
-)
+
+def _categories_text(categories: Taxonomy) -> str:
+    return "\n".join(f"- {group}: {', '.join(cats)}" for group, cats in assignable_groups(categories).items())
+
 
 # Structured-output schema for the Anthropic branch — Claude's structured
 # outputs require a top-level JSON object, so the array of results is wrapped
@@ -46,7 +46,7 @@ ANTHROPIC_RESULT_SCHEMA = {
 }
 
 
-def _build_prompt(batch: list[dict]) -> str:
+def _build_prompt(batch: list[dict], categories: Taxonomy) -> str:
     """Build the identical categorization prompt used by both provider branches."""
     descriptions = [
         f"{idx+1}. {t['description']} | {t['original_amount']} {t['original_currency']} | {t['bank']}"
@@ -56,7 +56,7 @@ def _build_prompt(batch: list[dict]) -> str:
     return f"""Categorize each transaction into the budget hierarchy below.
 
 Categories:
-{ALL_CATEGORIES_TEXT}
+{_categories_text(categories)}
 
 For each transaction, return the General Category (group name) and Precise Description (subcategory name).
 Use EXACTLY the category names listed above.
@@ -68,7 +68,7 @@ Return a JSON array with objects having "general_category" and "precise_category
 Return ONLY the JSON array, no other text."""
 
 
-PROMPT_HASH = agent_trace.prompt_hash(_build_prompt([]))
+PROMPT_HASH = agent_trace.prompt_hash(_build_prompt([], {}))
 
 
 class BatchReply(NamedTuple):
@@ -88,7 +88,14 @@ def _usage(response, in_attr: str, out_attr: str) -> dict | None:
 class LlmAgent(CategorizationAgent):
     """Chat-LLM agents: one batched prompt per BATCH_SIZE transactions."""
 
-    async def classify(self, transactions: list[dict]) -> list[dict]:
+    async def classify(self, transactions: list[dict], categories: Taxonomy) -> list[dict]:
+        if transactions and not assignable_groups(categories):
+            log_event(
+                logger, "agent_taxonomy", level=logging.WARNING, provider=self.provider, ok=False, reason="empty",
+            )
+            self.last_run_stats = {}
+            return [dict(UNCATEGORIZED) for _ in transactions]
+        tax_hash = agent_trace.taxonomy_hash(categories)
         results = []
         total_batches = -(-len(transactions) // BATCH_SIZE)
         failed_batches = 0
@@ -97,19 +104,20 @@ class LlmAgent(CategorizationAgent):
             batch = transactions[i:i + BATCH_SIZE]
             batch_no = i // BATCH_SIZE + 1
             batch_start = time.perf_counter()
-            prompt = _build_prompt(batch)
+            prompt = _build_prompt(batch, categories)
             trace = {
                 "model": self.model, "stage": "batch", "batch": f"{batch_no}/{total_batches}",
-                "size": len(batch), "prompt_hash": PROMPT_HASH, "input": {"prompt": prompt},
+                "size": len(batch), "prompt_hash": PROMPT_HASH,
+                "taxonomy_hash": tax_hash, "input": {"prompt": prompt},
             }
             try:
                 reply = await self._complete_batch(prompt)
-                categories = reply.categories
-                parsed = list(categories)
-                padded = max(0, len(batch) - len(categories))
-                while len(categories) < len(batch):
-                    categories.append(dict(UNCATEGORIZED))
-                results.extend(categories[:len(batch)])
+                answers = reply.categories
+                parsed = list(answers)
+                padded = max(0, len(batch) - len(answers))
+                while len(answers) < len(batch):
+                    answers.append(dict(UNCATEGORIZED))
+                results.extend(answers[:len(batch)])
                 total_padded += padded
                 ms = elapsed_ms(batch_start)
                 log_event(

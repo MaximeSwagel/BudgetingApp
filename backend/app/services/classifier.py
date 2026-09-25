@@ -8,6 +8,7 @@ from app.config import settings
 from app.observability import elapsed_ms, log_event
 from app.services.agents.base import UNCATEGORIZED, CategorizationAgent
 from app.services.agents.registry import build_agent
+from app.services.taxonomy import load_category_hierarchy
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +90,8 @@ async def _categorize(transactions: list[dict], run_id: str) -> list[dict]:
     status = "ok"
     stats: dict = {}
     try:
-        results = await agent.classify(transactions)
+        categories = await load_category_hierarchy()
+        results = await agent.classify(transactions, categories)
         stats = _safe_stats(getattr(agent, "last_run_stats", None))
     except Exception as e:
         status = type(e).__name__

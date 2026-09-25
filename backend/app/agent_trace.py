@@ -124,6 +124,12 @@ def prompt_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()[:12]
 
 
+def taxonomy_hash(categories: dict[str, list[str]]) -> str:
+    """Order-sensitive on purpose: a reordered hierarchy changes what the agents see."""
+    text = json.dumps(list(categories.items()), ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
 def reset() -> None:
     global _disabled
     for entry in list(_handlers.values()):

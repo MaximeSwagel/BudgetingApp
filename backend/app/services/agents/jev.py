@@ -3,13 +3,14 @@ import logging
 import re
 import statistics
 import time
+from typing import NamedTuple
 
 import httpx
 
 from app import agent_trace
 from app.config import settings
 from app.observability import elapsed_ms, log_event
-from app.services.agents.base import CATEGORY_HIERARCHY, UNCATEGORIZED, CategorizationAgent
+from app.services.agents.base import UNCATEGORIZED, CategorizationAgent, Taxonomy, assignable_groups
 from app.services.openrouter_client import JEV_MODEL, DecisionsAuthError, DecisionsError, decide_choice
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 JEV_MAX_CONCURRENCY = 8
 JEV_REQUEST_TIMEOUT_SECONDS = 20.0
 OTHER_OPTION = "other"
+JEV_MAX_OPTIONS = 255
 
 GROUP_INSTRUCTIONS = (
     "Which budget group does this personal bank-statement transaction belong to? "
@@ -44,12 +46,35 @@ def _slugs(names: list[str], reserved: set[str] = frozenset()) -> dict[str, str]
     return out
 
 
-GROUP_SLUGS = _slugs(list(CATEGORY_HIERARCHY), reserved={OTHER_OPTION})
-GROUP_CRITERIA = {
-    **{slug: f"{name}: {', '.join(CATEGORY_HIERARCHY[name])}" for slug, name in GROUP_SLUGS.items()},
-    OTHER_OPTION: OTHER_DESCRIPTION,
-}
-CATEGORY_SLUGS = {group: _slugs(cats) for group, cats in CATEGORY_HIERARCHY.items()}
+class JevOptions(NamedTuple):
+    group_slugs: dict[str, str]
+    group_criteria: dict[str, str]
+    category_slugs: dict[str, dict[str, str]]
+
+
+def build_options(categories: Taxonomy) -> JevOptions:
+    """Options for one call. Groups without subcategories are not offered; past the
+    provider's option cap the hierarchy is truncated in display order."""
+    groups = assignable_groups(categories)
+    if len(groups) > JEV_MAX_OPTIONS - 1:
+        log_event(
+            logger, "agent_taxonomy", level=logging.WARNING, provider="openrouter", ok=False,
+            reason="group_cap", count=len(groups), kept=JEV_MAX_OPTIONS - 1,
+        )
+        groups = dict(list(groups.items())[:JEV_MAX_OPTIONS - 1])
+    truncated = [g for g, cats in groups.items() if len(cats) > JEV_MAX_OPTIONS]
+    if truncated:
+        log_event(
+            logger, "agent_taxonomy", level=logging.WARNING, provider="openrouter", ok=False,
+            reason="category_cap", groups=len(truncated), kept=JEV_MAX_OPTIONS,
+        )
+        groups = {g: cats[:JEV_MAX_OPTIONS] for g, cats in groups.items()}
+    group_slugs = _slugs(list(groups), reserved={OTHER_OPTION})
+    group_criteria = {
+        **{slug: f"{name}: {', '.join(groups[name])}" for slug, name in group_slugs.items()},
+        OTHER_OPTION: OTHER_DESCRIPTION,
+    }
+    return JevOptions(group_slugs, group_criteria, {g: _slugs(cats) for g, cats in groups.items()})
 
 
 def _score(answer) -> float:
@@ -90,9 +115,16 @@ class JevAgent(CategorizationAgent):
         # Seam: a future LLM fallback or composite agent would handle the line here.
         return dict(UNCATEGORIZED)
 
-    async def classify(self, transactions: list[dict]) -> list[dict]:
+    async def classify(self, transactions: list[dict], categories: Taxonomy) -> list[dict]:
         if not transactions:
             return []
+        options = build_options(categories)
+        if not options.group_slugs:
+            log_event(
+                logger, "agent_taxonomy", level=logging.WARNING, provider=self.provider, ok=False, reason="empty",
+            )
+            self.last_run_stats = {}
+            return [dict(UNCATEGORIZED) for _ in transactions]
         semaphore = asyncio.Semaphore(JEV_MAX_CONCURRENCY)
         auth_failed = asyncio.Event()
         outcomes: list[dict] = []
@@ -115,7 +147,7 @@ class JevAgent(CategorizationAgent):
                             outcome["decision"] = "auth"
                             return self._unresolved(txn, "auth")
                         try:
-                            return await self._classify_line(client, txn, outcome)
+                            return await self._classify_line(client, txn, outcome, options)
                         except DecisionsAuthError:
                             auth_failed.set()
                             outcome["decision"] = "auth"
@@ -181,21 +213,21 @@ class JevAgent(CategorizationAgent):
             outcome["cost"] = (outcome["cost"] or 0.0) + answer.cost
         return answer, record
 
-    async def _classify_line(self, client: httpx.AsyncClient, txn: dict, outcome: dict) -> dict:
-        group_answer, record = await self._decide(client, outcome, "group", GROUP_INSTRUCTIONS, GROUP_CRITERIA)
+    async def _classify_line(self, client: httpx.AsyncClient, txn: dict, outcome: dict, options: JevOptions) -> dict:
+        group_answer, record = await self._decide(client, outcome, "group", GROUP_INSTRUCTIONS, options.group_criteria)
         group_score = _score(group_answer)
         outcome["group_score"] = group_score
         if group_answer.choice == OTHER_OPTION:
             record["decision"] = outcome["decision"] = "other"
         else:
-            outcome["group"] = GROUP_SLUGS[group_answer.choice]
+            outcome["group"] = options.group_slugs[group_answer.choice]
             record["decision"] = outcome["decision"] = "group_low" if group_score < self.threshold else "accepted"
         agent_trace.write(self.provider, record)
         if outcome["decision"] != "accepted":
             return self._unresolved(txn, "group")
         group = outcome["group"]
 
-        slugs = CATEGORY_SLUGS[group]
+        slugs = options.category_slugs[group]
         if len(slugs) == 1:
             (category,) = slugs.values()
             cat_score = 1.0
