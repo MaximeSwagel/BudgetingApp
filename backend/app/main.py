@@ -1,11 +1,10 @@
-import logging
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from app.database import engine, async_session
 from app.models import Base, CategoryGroup, Category
+from app.observability import RequestTimingMiddleware, configure_logging
 from app.repositories import UserSettingsRepository
 from app.routers import (
     admin,
@@ -21,7 +20,7 @@ from app.routers import (
     upload,
 )
 
-logging.basicConfig(level=logging.INFO)
+configure_logging()
 
 # The production nginx config (frontend/nginx.conf) proxies only its `location /api/`
 # block to this backend; every other path falls through to the SPA catch-all and
@@ -42,6 +41,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Added last so it is outermost: timing covers CORS (including preflight) too.
+app.add_middleware(RequestTimingMiddleware)
 
 app.include_router(upload.router)
 app.include_router(transactions.router)
