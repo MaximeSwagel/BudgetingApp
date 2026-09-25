@@ -1,3 +1,5 @@
+from collections import Counter
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -8,7 +10,12 @@ from app.repositories import (
     CategoryRepository,
     TransactionRepository,
 )
-from app.services.classifier import categorize_transactions, get_active_agent, resolve_category_id
+from app.services.classifier import (
+    categorize_transactions,
+    get_active_agent,
+    log_category_fallbacks,
+    resolve_category_id,
+)
 from app.services.corrections import categorize_with_corrections, learned_categories, match_key
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
@@ -46,12 +53,14 @@ async def auto_categorize(db: AsyncSession = Depends(get_db)):
     group_repo = CategoryGroupRepository(db)
     category_repo = CategoryRepository(db)
     categorized = 0
+    fallbacks: Counter[str] = Counter()
     for txn, cat_data in zip(txns, results):
-        category_id = await resolve_category_id(cat_data, group_repo, category_repo)
+        category_id = await resolve_category_id(cat_data, group_repo, category_repo, fallbacks=fallbacks)
         if category_id is not None:
             txn.category_id = category_id
             categorized += 1
 
+    log_category_fallbacks(fallbacks, source="auto_categorize", rows=len(txns))
     await repo.commit()
     remaining = await repo.count_uncategorized()
     return {

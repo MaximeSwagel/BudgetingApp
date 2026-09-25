@@ -2,11 +2,12 @@ import logging
 import math
 import re
 import time
+from collections import Counter
 
 from app import agent_trace
 from app.config import settings
 from app.observability import elapsed_ms, log_event
-from app.services.agents.base import UNCATEGORIZED, CategorizationAgent
+from app.services.agents.base import UNCATEGORIZED, CategorizationAgent, assignable_groups
 from app.services.agents.registry import build_agent
 from app.services.taxonomy import load_category_hierarchy
 
@@ -21,10 +22,13 @@ def get_active_agent() -> CategorizationAgent:
     return build_agent(settings.ai_provider)
 
 
-async def resolve_category_id(cat_data: dict, group_repo, category_repo) -> int | None:
+async def resolve_category_id(
+    cat_data: dict, group_repo, category_repo, fallbacks: Counter[str] | None = None
+) -> int | None:
     """Map a categorizer result to a category id, or None when it produced
     nothing usable (the transaction then stays honestly uncategorized).
-    Shared by CSV upload and the bulk auto-categorize endpoint."""
+    Shared by CSV upload and the bulk auto-categorize endpoint. When given,
+    `fallbacks` counts every answer that had to be repaired or dropped."""
     general = cat_data.get("general_category", "Uncategorized")
     precise = cat_data.get("precise_category", "Uncategorized")
 
@@ -32,11 +36,25 @@ async def resolve_category_id(cat_data: dict, group_repo, category_repo) -> int 
         return None
     group = await group_repo.get_by_name(general)
     if not group:
+        if fallbacks is not None:
+            fallbacks["unknown_group"] += 1
         return None
     cat = await category_repo.get_by_name_in_group(precise, group.id)
     if not cat:
         cat = await category_repo.first_in_group(group.id)
+        if fallbacks is not None:
+            fallbacks["unknown_category" if cat else "empty_group"] += 1
     return cat.id if cat else None
+
+
+def log_category_fallbacks(fallbacks: Counter[str], *, source: str, rows: int) -> None:
+    if not sum(fallbacks.values()):
+        return
+    log_event(
+        logger, "category_fallback", level=logging.WARNING, source=source, rows=rows,
+        unknown_category=fallbacks["unknown_category"], empty_group=fallbacks["empty_group"],
+        unknown_group=fallbacks["unknown_group"],
+    )
 
 
 def _guard_contract(results, expected: int) -> list[dict]:
@@ -82,15 +100,27 @@ async def _categorize(transactions: list[dict], run_id: str) -> list[dict]:
         )
         agent_trace.write(agent.provider, {
             "model": agent.model, "stage": "run", "rows": rows, "uncategorized": rows,
-            "stats": {}, "ms": 0.0, "status": "no_api_key",
+            "stats": {}, "ms": 0.0, "status": "no_api_key", "taxonomy_hash": None,
         })
         return [dict(UNCATEGORIZED) for _ in transactions]
 
     start = time.perf_counter()
     status = "ok"
     stats: dict = {}
+    tax_hash = None
     try:
         categories = await load_category_hierarchy()
+        tax_hash = agent_trace.taxonomy_hash(categories)
+        if not assignable_groups(categories):
+            log_event(
+                logger, "llm_categorize", level=logging.WARNING, provider=agent.provider, model=agent.model,
+                rows=rows, ok=False, skipped="no_categories", run=run_id,
+            )
+            agent_trace.write(agent.provider, {
+                "model": agent.model, "stage": "run", "rows": rows, "uncategorized": rows,
+                "stats": {}, "ms": elapsed_ms(start), "status": "no_categories", "taxonomy_hash": tax_hash,
+            })
+            return [dict(UNCATEGORIZED) for _ in transactions]
         results = await agent.classify(transactions, categories)
         stats = _safe_stats(getattr(agent, "last_run_stats", None))
     except Exception as e:
@@ -109,6 +139,6 @@ async def _categorize(transactions: list[dict], run_id: str) -> list[dict]:
     )
     agent_trace.write(agent.provider, {
         "model": agent.model, "stage": "run", "rows": rows, "uncategorized": uncategorized,
-        "stats": stats, "ms": ms, "status": status,
+        "stats": stats, "ms": ms, "status": status, "taxonomy_hash": tax_hash,
     })
     return results

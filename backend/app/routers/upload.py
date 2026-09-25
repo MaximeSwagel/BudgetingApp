@@ -1,5 +1,6 @@
 import logging
 import time
+from collections import Counter
 from datetime import datetime
 from decimal import Decimal
 
@@ -19,7 +20,7 @@ from app.repositories import (
     TransactionRepository,
     UploadLogRepository,
 )
-from app.services.classifier import categorize_transactions, resolve_category_id
+from app.services.classifier import categorize_transactions, log_category_fallbacks, resolve_category_id
 from app.services.corrections import categorize_with_corrections, learned_categories
 from app.services.currency import convert_amount
 from app.services.transfer_scan import resolve_transfer_fee_category_id, scan_and_persist
@@ -192,11 +193,12 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
     persist_start = time.perf_counter()
     fee_category_id = await resolve_transfer_fee_category_id(group_repo, category_repo)
 
+    fallbacks: Counter[str] = Counter()
     for txn_data, cat_data in zip(parsed_transactions, categories):
         # A failed/skipped categorization resolves to None and stays NULL
         # ("Uncategorized" in the UI) rather than being silently dumped into
         # a wrong category.
-        category_id = await resolve_category_id(cat_data, group_repo, category_repo)
+        category_id = await resolve_category_id(cat_data, group_repo, category_repo, fallbacks=fallbacks)
 
         orig_amount = txn_data["original_amount"]
         orig_currency = txn_data["original_currency"]
@@ -293,6 +295,8 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
                     )
                 )
                 fees_recorded += 1
+
+    log_category_fallbacks(fallbacks, source="upload", rows=len(parsed_transactions))
 
     # Fee rows count toward the batch total so undo-import removes them too,
     # while the "imported" response key below stays principal-rows-only --
