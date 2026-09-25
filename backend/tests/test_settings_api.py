@@ -84,3 +84,34 @@ async def test_put_recurring_settings_rejects_non_numeric(client):
 async def test_put_recurring_settings_rejects_non_positive(client):
     resp = await client.put("/api/settings/recurring", json={"recurring_large_threshold": "0"})
     assert resp.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_ai_settings_report_openrouter_without_leaking_keys(client, monkeypatch):
+    from app.services.openrouter_client import JEV_MODEL
+
+    monkeypatch.setattr(settings, "openrouter_api_key", "sk-or-secret")
+    body = (await client.get("/api/settings/ai")).json()
+
+    assert body["openrouter_model"] == JEV_MODEL
+    assert body["openrouter_key_configured"] is True
+    assert not any(k.endswith("_api_key") for k in body)
+    assert "sk-or-secret" not in str(body)
+
+
+@pytest.mark.asyncio
+async def test_put_openrouter_provider_round_trips(client, monkeypatch):
+    monkeypatch.setattr(settings, "ai_provider", settings.ai_provider)
+
+    assert (await client.put("/api/settings/ai", json={"ai_provider": "openrouter"})).status_code == 200
+    assert (await client.get("/api/settings/ai")).json()["ai_provider"] == "openrouter"
+
+
+@pytest.mark.asyncio
+async def test_models_catalog_includes_jev(client):
+    body = (await client.get("/api/settings/ai/models")).json()
+
+    (jev,) = body["providers"]["openrouter"]
+    assert jev["input_per_1m"] == 0.042
+    assert jev["output_per_1m"] == 0
+    assert jev["est_cost_per_1000_txns"] >= 0

@@ -1,7 +1,7 @@
 import pytest
 
 from app.config import settings
-from app.services.categorizer import categorize_transactions
+from app.services.classifier import categorize_transactions
 
 TXNS = [
     {"description": "Tesco", "original_amount": "20.00", "original_currency": "ILS", "bank": "Revolut"},
