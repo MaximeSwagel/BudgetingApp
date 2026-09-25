@@ -8,6 +8,16 @@ resource "aws_iam_openid_connect_provider" "github" {
   url             = "https://token.actions.githubusercontent.com"
   client_id_list  = ["sts.amazonaws.com"]
   thumbprint_list = [data.tls_certificate.github.certificates[0].sha1_fingerprint]
+
+  # For token.actions.githubusercontent.com, AWS validates GitHub's tokens
+  # against its own library of trusted root CAs and no longer relies on this
+  # thumbprint. The live thumbprint (22ff89...) and the tls_certificate value
+  # (ab9d02...) drift apart as GitHub rotates intermediate certificates, which
+  # caused a permanent in-place diff that changed nothing. The thumbprint is
+  # still supplied on first create.
+  lifecycle {
+    ignore_changes = [thumbprint_list]
+  }
 }
 
 resource "aws_iam_role" "github_actions_deploy" {

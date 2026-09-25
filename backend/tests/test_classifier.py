@@ -18,6 +18,7 @@ class StubAgent(CategorizationAgent):
     provider = "stub"
     label = "Stub"
     env_var = "STUB_KEY"
+    model = "stub-model"
 
     def __init__(self, result=None, configured=True, error=None):
         self.result, self.configured, self.error, self.called = result, configured, error, False

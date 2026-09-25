@@ -1,11 +1,13 @@
 import json
 import logging
+import time
 from abc import abstractmethod
 
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
 from app.config import settings
+from app.observability import elapsed_ms, log_event
 from app.services.agents.base import CATEGORY_HIERARCHY, UNCATEGORIZED, CategorizationAgent
 
 logger = logging.getLogger(__name__)
@@ -69,15 +71,32 @@ class LlmAgent(CategorizationAgent):
 
     async def classify(self, transactions: list[dict]) -> list[dict]:
         results = []
+        total_batches = -(-len(transactions) // BATCH_SIZE)
         for i in range(0, len(transactions), BATCH_SIZE):
             batch = transactions[i:i + BATCH_SIZE]
+            batch_no = i // BATCH_SIZE + 1
+            batch_start = time.perf_counter()
             try:
                 categories = await self._complete_batch(_build_prompt(batch))
+                padded = max(0, len(batch) - len(categories))
                 while len(categories) < len(batch):
                     categories.append(dict(UNCATEGORIZED))
                 results.extend(categories[:len(batch)])
+                log_event(
+                    logger, "llm_batch", provider=self.provider, model=self.model,
+                    batch=f"{batch_no}/{total_batches}", size=len(batch), ok=True, padded=padded,
+                    ms=elapsed_ms(batch_start),
+                )
             except Exception as e:
-                logger.error(f"{self.label} categorization failed: {e}")
+                # Class and HTTP status only, never str(e): SDK error text can carry
+                # key fragments or prompt text, and class + status already separates
+                # auth (401), missing model (404), rate limit (429) and bad JSON.
+                log_event(
+                    logger, "llm_batch", level=logging.ERROR, provider=self.provider, model=self.model,
+                    batch=f"{batch_no}/{total_batches}", size=len(batch), ok=False,
+                    fallback="uncategorized", error=type(e).__name__,
+                    status_code=getattr(e, "status_code", None), ms=elapsed_ms(batch_start),
+                )
                 results.extend([dict(UNCATEGORIZED) for _ in batch])
         return results
 
@@ -89,6 +108,10 @@ class OpenAiAgent(LlmAgent):
     provider = "openai"
     label = "OpenAI"
     env_var = "OPENAI_API_KEY"
+
+    @property
+    def model(self) -> str:
+        return settings.openai_model
 
     def is_configured(self) -> bool:
         return bool(settings.openai_api_key)
@@ -118,6 +141,10 @@ class AnthropicAgent(LlmAgent):
     provider = "anthropic"
     label = "Anthropic"
     env_var = "ANTHROPIC_API_KEY"
+
+    @property
+    def model(self) -> str:
+        return settings.anthropic_model
 
     def is_configured(self) -> bool:
         return bool(settings.anthropic_api_key)

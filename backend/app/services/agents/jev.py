@@ -5,8 +5,9 @@ import re
 import httpx
 
 from app.config import settings
+from app.observability import log_event
 from app.services.agents.base import CATEGORY_HIERARCHY, UNCATEGORIZED, CategorizationAgent
-from app.services.openrouter_client import DecisionsAuthError, DecisionsError, decide_choice
+from app.services.openrouter_client import JEV_MODEL, DecisionsAuthError, DecisionsError, decide_choice
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,10 @@ class JevAgent(CategorizationAgent):
     label = "OpenRouter"
     env_var = "OPENROUTER_API_KEY"
 
+    @property
+    def model(self) -> str:
+        return JEV_MODEL
+
     def __init__(self, api_key: str | None = None, threshold: float | None = None, transport=None):
         self._api_key = api_key
         self._threshold = threshold
@@ -98,9 +103,16 @@ class JevAgent(CategorizationAgent):
                         return await self._classify_line(client, txn)
                     except DecisionsAuthError:
                         auth_failed.set()
-                        logger.error("Jev rejected the API key; skipping remaining lines")
+                        log_event(
+                            logger, "jev_line", level=logging.ERROR, model=JEV_MODEL,
+                            ok=False, error="DecisionsAuthError", fallback="skip_remaining",
+                        )
                     except Exception as e:
-                        logger.warning(f"Jev failed on line {index}: {type(e).__name__}")
+                        log_event(
+                            logger, "jev_line", level=logging.WARNING, model=JEV_MODEL, line=index,
+                            ok=False, fallback="uncategorized", error=type(e).__name__,
+                            status_code=getattr(e, "status_code", None),
+                        )
                     return self._unresolved(txn, "error")
 
             return list(await asyncio.gather(*(one(i, t) for i, t in enumerate(transactions))))

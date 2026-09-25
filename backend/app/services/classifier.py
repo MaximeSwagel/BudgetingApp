@@ -1,6 +1,8 @@
 import logging
+import time
 
 from app.config import settings
+from app.observability import elapsed_ms, log_event
 from app.services.agents.base import UNCATEGORIZED, CategorizationAgent
 from app.services.agents.registry import build_agent
 
@@ -45,12 +47,25 @@ async def categorize_transactions(transactions: list[dict]) -> list[dict]:
 
     agent = get_active_agent()
     if not agent.is_configured():
-        logger.warning(f"No {agent.label} API key configured, skipping categorization")
+        log_event(
+            logger, "llm_categorize", level=logging.WARNING, provider=agent.provider, model=agent.model,
+            rows=len(transactions), ok=False, skipped="no_api_key",
+        )
         return [dict(UNCATEGORIZED) for _ in transactions]
 
+    start = time.perf_counter()
     try:
         results = await agent.classify(transactions)
     except Exception as e:
-        logger.error(f"{agent.label} categorization failed: {type(e).__name__}")
+        log_event(
+            logger, "llm_categorize", level=logging.ERROR, provider=agent.provider, model=agent.model,
+            rows=len(transactions), ok=False, error=type(e).__name__,
+        )
         results = []
-    return _guard_contract(results, len(transactions))
+    results = _guard_contract(results, len(transactions))
+    uncategorized = sum(1 for r in results if r.get("general_category") == "Uncategorized")
+    log_event(
+        logger, "llm_categorize", provider=agent.provider, model=agent.model, rows=len(transactions),
+        uncategorized=uncategorized, ms=elapsed_ms(start),
+    )
+    return results

@@ -1,0 +1,14 @@
+# Optional SSH access to the app instance.
+#
+# Copy this file to terraform.tfvars (git-ignored), or export
+# TF_VAR_ssh_allowed_cidr and TF_VAR_ssh_public_key instead. If both are set,
+# terraform.tfvars takes precedence over TF_VAR_* environment variables.
+# TF_VAR_ssh_public_key can be filled from a key file with shell command
+# substitution: export TF_VAR_ssh_public_key="$(cat ~/.ssh/<key>.pub)"
+#
+# Leaving either value empty keeps SSH closed (no CIDR) or keyless (no key).
+# Changing ssh_public_key replaces the instance (EC2 key pairs apply at launch).
+# SSM Session Manager (aws ssm start-session --target <instance-id>) works either way.
+
+ssh_allowed_cidr = "203.0.113.10/32"
+ssh_public_key   = "ssh-ed25519 AAAA-REPLACE-WITH-YOUR-PUBLIC-KEY you@laptop"

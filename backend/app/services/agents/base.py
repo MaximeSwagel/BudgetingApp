@@ -28,6 +28,10 @@ class CategorizationAgent(ABC):
     label: str
     env_var: str
 
+    @property
+    @abstractmethod
+    def model(self) -> str: ...
+
     @abstractmethod
     def is_configured(self) -> bool: ...
 

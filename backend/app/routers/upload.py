@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import datetime
 from decimal import Decimal
 
@@ -8,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.models import ImportBatch, Transaction, UploadLog
+from app.observability import elapsed_ms, log_event
 from app.parsers import detect_bank_format, parse_credit_agricole, parse_leumi, parse_revolut_en, parse_revolut_fr
 from app.repositories import (
     CategoryCorrectionRepository,
@@ -91,6 +93,7 @@ async def _record_failed_upload(
 
 @router.post("")
 async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(get_db)):
+    start = time.perf_counter()
     content = await file.read()
     filename = file.filename or "unknown.csv"
     log_repo = UploadLogRepository(db)
@@ -98,6 +101,11 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
     try:
         format_type = detect_bank_format(content)
     except ValueError as e:
+        # Fixed reason codes only: the detector's message embeds the CSV's first line.
+        log_event(
+            logger, "csv_upload", level=logging.WARNING,
+            status="failed", reason="unrecognized_format", parser=None, ms=elapsed_ms(start),
+        )
         await _record_failed_upload(log_repo, filename=filename, error=str(e))
         return {"error": str(e)}
 
@@ -110,19 +118,44 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
 
     if format_type == "revolut_merged":
         error = "Merged Revolut CSVs are not supported. Please upload per-currency account statements."
+        log_event(
+            logger, "csv_upload", level=logging.WARNING,
+            status="failed", reason="merged_revolut", parser=format_type, ms=elapsed_ms(start),
+        )
         await _record_failed_upload(log_repo, filename=filename, error=error, format_detected=format_type)
         return {"error": error}
 
     parser = parsers.get(format_type)
     if not parser:
         error = f"Unsupported format: {format_type}"
+        log_event(
+            logger, "csv_upload", level=logging.WARNING,
+            status="failed", reason="unsupported_format", parser=format_type, ms=elapsed_ms(start),
+        )
         await _record_failed_upload(log_repo, filename=filename, error=error, format_detected=format_type)
         return {"error": error}
 
-    parsed_transactions = parser(content)
+    parse_start = time.perf_counter()
+    try:
+        parsed_transactions = parser(content)
+    except Exception as e:
+        log_event(
+            logger, "csv_parse", level=logging.ERROR,
+            parser=format_type, ok=False, error=type(e).__name__, ms=elapsed_ms(parse_start),
+        )
+        raise
+    parse_ms = elapsed_ms(parse_start)
+    log_event(
+        logger, "csv_parse",
+        parser=format_type, rows=len(parsed_transactions), bytes=len(content), ms=parse_ms,
+    )
 
     if not parsed_transactions:
         error = "No valid transactions found in the CSV"
+        log_event(
+            logger, "csv_upload", level=logging.WARNING,
+            status="failed", reason="no_transactions", parser=format_type, ms=elapsed_ms(start),
+        )
         await _record_failed_upload(log_repo, filename=filename, error=error, format_detected=format_type)
         return {"error": error}
 
@@ -143,7 +176,10 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
     await batch_repo.flush()
 
     learned = learned_categories(await CategoryCorrectionRepository(db).key_map())
+    categorize_start = time.perf_counter()
     categories = await categorize_with_corrections(parsed_transactions, learned, categorize_transactions)
+    categorize_ms = elapsed_ms(categorize_start)
+    log_event(logger, "csv_categorize", rows=len(parsed_transactions), ms=categorize_ms)
 
     base_currency = settings.base_currency
     imported_count = 0
@@ -153,6 +189,7 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
     # Resolved once per upload (not once per row) -- a missing category is a
     # soft failure, so a fee row lands uncategorized rather than the whole
     # upload failing (D-08/D-09).
+    persist_start = time.perf_counter()
     fee_category_id = await resolve_transfer_fee_category_id(group_repo, category_repo)
 
     for txn_data, cat_data in zip(parsed_transactions, categories):
@@ -280,16 +317,28 @@ async def upload_csv(file: UploadFile = File(...), db: AsyncSession = Depends(ge
 
     # Same session/transaction as the batch + imported transactions above.
     await batch_repo.commit()
+    persist_ms = elapsed_ms(persist_start)
 
     # Run internal-transfer detection at the end of every successful upload
     # (D-07) -- wrapped so a detection failure logs and returns zero rather
     # than failing an otherwise successful import.
+    scan_start = time.perf_counter()
     try:
         scan_summary = await scan_and_persist(db)
         transfers_detected = scan_summary["created"]
     except Exception as e:
         logger.error(f"Transfer detection after upload failed: {e}")
         transfers_detected = 0
+    transfer_scan_ms = elapsed_ms(scan_start)
+
+    log_event(
+        logger, "csv_upload",
+        status="ok", parser=format_type, bank=bank,
+        rows_parsed=len(parsed_transactions), rows_imported=imported_count,
+        duplicates=duplicates, fees=fees_recorded, transfers=transfers_detected,
+        parse_ms=parse_ms, categorize_ms=categorize_ms, persist_ms=persist_ms,
+        transfer_scan_ms=transfer_scan_ms, ms=elapsed_ms(start),
+    )
 
     return {
         "format_detected": format_type,
