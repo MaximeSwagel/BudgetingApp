@@ -3,7 +3,7 @@ wire-format knowledge (URL, model, request/response shape) lives only here."""
 
 import asyncio
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import httpx
 
@@ -18,7 +18,10 @@ MAX_BACKOFF_SECONDS = 8.0
 
 
 class DecisionsError(Exception):
-    pass
+    def __init__(self, message: str, *, status_code: int | None = None, attempts: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.attempts = attempts
 
 
 class DecisionsAuthError(DecisionsError):
@@ -31,6 +34,7 @@ class ChoiceAnswer:
     confidence: float | None
     probabilities: dict[str, float]
     cost: float | None
+    attempts: int = 1
 
 
 def _delay(attempt: int, response: httpx.Response | None) -> float:
@@ -88,27 +92,44 @@ async def decide_choice(
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
 
     last_error = "no attempt made"
+    last_status: int | None = None
     for attempt in range(MAX_RETRIES + 1):
         response = None
+        last_status = None
         try:
             response = await client.post(DECISIONS_URL, json=body, headers=headers)
         except (httpx.TimeoutException, httpx.TransportError) as e:
             last_error = type(e).__name__
         else:
-            if response.status_code in AUTH_STATUS:
-                raise DecisionsAuthError(f"OpenRouter rejected the request ({response.status_code}): {_snippet(response, api_key)}")
-            if response.status_code in RETRYABLE_STATUS:
-                last_error = f"status {response.status_code}: {_snippet(response, api_key)}"
-            elif response.status_code >= 400:
-                raise DecisionsError(f"decisions request failed ({response.status_code}): {_snippet(response, api_key)}")
+            status = response.status_code
+            if status in AUTH_STATUS:
+                raise DecisionsAuthError(
+                    f"OpenRouter rejected the request ({status}): {_snippet(response, api_key)}",
+                    status_code=status, attempts=attempt + 1,
+                )
+            if status in RETRYABLE_STATUS:
+                last_status = status
+                last_error = f"status {status}: {_snippet(response, api_key)}"
+            elif status >= 400:
+                raise DecisionsError(
+                    f"decisions request failed ({status}): {_snippet(response, api_key)}",
+                    status_code=status, attempts=attempt + 1,
+                )
             else:
                 try:
                     data = response.json()
                 except ValueError:
-                    raise DecisionsError("decisions response was not JSON") from None
-                return _parse_choice(data, question_id, criteria)
+                    raise DecisionsError("decisions response was not JSON", attempts=attempt + 1) from None
+                try:
+                    return replace(_parse_choice(data, question_id, criteria), attempts=attempt + 1)
+                except DecisionsError as e:
+                    e.attempts = attempt + 1
+                    raise
 
         if attempt < MAX_RETRIES:
             await asyncio.sleep(_delay(attempt, response))
 
-    raise DecisionsError(f"decisions request failed after retries ({last_error})")
+    raise DecisionsError(
+        f"decisions request failed after retries ({last_error})",
+        status_code=last_status, attempts=MAX_RETRIES + 1,
+    )
