@@ -181,3 +181,65 @@ async def test_key_never_in_error_message():
     with pytest.raises(DecisionsAuthError) as exc:
         await call(auth)
     assert "sk-secret-key" not in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_attempts_counts_http_tries():
+    calls = []
+
+    async def handler(request):
+        calls.append(1)
+        if len(calls) == 1:
+            return httpx.Response(429, headers={"Retry-After": "0"})
+        return httpx.Response(200, json=ok_body())
+
+    assert (await call(handler)).attempts == 2
+
+    async def plain(request):
+        return httpx.Response(200, json=ok_body())
+
+    assert (await call(plain)).attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_client_errors_carry_status_and_attempts():
+    async def bad(request):
+        return httpx.Response(400, text="bad")
+
+    with pytest.raises(DecisionsError) as exc:
+        await call(bad)
+    assert exc.value.status_code == 400 and exc.value.attempts == 1
+
+    async def unauthorized(request):
+        return httpx.Response(401, text="nope")
+
+    with pytest.raises(DecisionsAuthError) as exc:
+        await call(unauthorized)
+    assert exc.value.status_code == 401 and exc.value.attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_exhausted_retries_carry_last_status_and_attempts():
+    async def down(request):
+        return httpx.Response(503, text="down")
+
+    with pytest.raises(DecisionsError) as exc:
+        await call(down)
+    assert exc.value.status_code == 503 and exc.value.attempts == oc.MAX_RETRIES + 1
+
+    async def slow(request):
+        raise httpx.ReadTimeout("slow")
+
+    with pytest.raises(DecisionsError) as exc:
+        await call(slow)
+    assert exc.value.status_code is None and exc.value.attempts == oc.MAX_RETRIES + 1
+
+
+@pytest.mark.asyncio
+async def test_malformed_body_has_no_status_and_one_attempt():
+    async def handler(request):
+        return httpx.Response(200, json={"answers": {}})
+
+    with pytest.raises(DecisionsError) as exc:
+        await call(handler)
+    assert exc.value.status_code is None and exc.value.attempts == 1
