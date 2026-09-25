@@ -12,6 +12,8 @@ const AI_SETTINGS = {
   anthropic_model: "claude-haiku-4-5",
   openai_key_configured: true,
   anthropic_key_configured: false,
+  openrouter_model: "~typesafe/jev-latest",
+  openrouter_key_configured: false,
 };
 
 const MODELS_CATALOG = {
@@ -21,6 +23,9 @@ const MODELS_CATALOG = {
     ],
     anthropic: [
       { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", input_per_1m: 1, output_per_1m: 5, est_cost_per_1000_txns: 0.05 },
+    ],
+    openrouter: [
+      { id: "~typesafe/jev-latest", label: "Jev (latest)", input_per_1m: 0.042, output_per_1m: 0, est_cost_per_1000_txns: 0.02 },
     ],
   },
   token_estimate_assumptions: { input_tokens_per_txn: 150, output_tokens_per_txn: 30, note: "" },
@@ -40,6 +45,7 @@ describe("SettingsPage", () => {
     vi.mocked(api.getUploadLogs).mockReset();
     vi.mocked(api.getRecurringSettings).mockReset();
     vi.mocked(api.updateRecurringSettings).mockReset();
+    vi.mocked(api.updateAiSettings).mockReset();
     setupMocks();
   });
 
@@ -86,6 +92,63 @@ describe("SettingsPage", () => {
 
     await waitFor(() =>
       expect(screen.getByText("recurring_large_threshold must be positive")).toBeInTheDocument()
+    );
+  });
+
+  it("shows a single key status for the selected provider", async () => {
+    render(<SettingsPage />);
+
+    await screen.findByLabelText("AI provider");
+    expect(screen.getAllByText("API key configured")).toHaveLength(1);
+    expect(screen.queryByText(/ANTHROPIC_API_KEY/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/OPENROUTER_API_KEY/)).not.toBeInTheDocument();
+  });
+
+  it("names the Anthropic env var when that provider is selected and unconfigured", async () => {
+    render(<SettingsPage />);
+
+    await userEvent.selectOptions(await screen.findByLabelText("AI provider"), "anthropic");
+
+    expect(
+      screen.getByText("Not configured — set ANTHROPIC_API_KEY in your environment")
+    ).toBeInTheDocument();
+    expect(screen.queryByText("API key configured")).not.toBeInTheDocument();
+  });
+
+  it("lists exactly the three providers", async () => {
+    render(<SettingsPage />);
+
+    const select = await screen.findByLabelText("AI provider");
+    const labels = Array.from(select.querySelectorAll("option")).map((o) => o.textContent);
+    expect(labels).toEqual(["OpenAI", "Claude (Anthropic)", "OpenRouter (Jev)"]);
+  });
+
+  it("shows a read-only Jev model with the line-by-line note for OpenRouter", async () => {
+    render(<SettingsPage />);
+
+    await userEvent.selectOptions(await screen.findByLabelText("AI provider"), "openrouter");
+
+    expect(screen.queryByRole("combobox", { name: /Model/ })).not.toBeInTheDocument();
+    const model = screen.getByLabelText(/Model/);
+    expect(model).toHaveValue("Jev (latest)");
+    expect(model).toHaveAttribute("readonly");
+    expect(screen.getByText(/line by line/)).toBeInTheDocument();
+    expect(screen.getByText(/stay Uncategorized/)).toBeInTheDocument();
+    expect(screen.getByText(/OPENROUTER_API_KEY/)).toBeInTheDocument();
+    expect(screen.getByText(/\$0\.042 in \/ free out per 1M tokens/)).toBeInTheDocument();
+  });
+
+  it("saves the OpenRouter provider", async () => {
+    vi.mocked(api.updateAiSettings).mockResolvedValue({});
+    render(<SettingsPage />);
+
+    await userEvent.selectOptions(await screen.findByLabelText("AI provider"), "openrouter");
+    await userEvent.click(screen.getAllByText("Save")[0]);
+
+    await waitFor(() =>
+      expect(api.updateAiSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ ai_provider: "openrouter" })
+      )
     );
   });
 });
