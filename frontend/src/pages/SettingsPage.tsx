@@ -7,7 +7,7 @@ import {
   updateAiSettings,
   updateRecurringSettings,
 } from "../api/client";
-import { Button, Card, PageHeader, TableContainer } from "../components/ui";
+import { Button, Card, Field, PageHeader, TableContainer } from "../components/ui";
 
 interface ModelInfo {
   id: string;
@@ -18,7 +18,7 @@ interface ModelInfo {
 }
 
 interface ModelsCatalog {
-  providers: { openai: ModelInfo[]; anthropic: ModelInfo[] };
+  providers: Record<string, ModelInfo[]>;
   token_estimate_assumptions: {
     input_tokens_per_txn: number;
     output_tokens_per_txn: number;
@@ -30,8 +30,10 @@ interface AiSettings {
   ai_provider: string;
   openai_model: string;
   anthropic_model: string;
+  openrouter_model: string;
   openai_key_configured: boolean;
   anthropic_key_configured: boolean;
+  openrouter_key_configured: boolean;
 }
 
 interface UploadLog {
@@ -48,20 +50,48 @@ interface UploadLog {
   error: string | null;
 }
 
-const PROVIDER_LABELS: Record<string, string> = {
-  openai: "OpenAI",
-  anthropic: "Claude (Anthropic)",
-};
+const PROVIDERS = [
+  { id: "openai", label: "OpenAI", envVar: "OPENAI_API_KEY", keyConfigured: (s: AiSettings) => s.openai_key_configured },
+  {
+    id: "anthropic",
+    label: "Claude (Anthropic)",
+    envVar: "ANTHROPIC_API_KEY",
+    keyConfigured: (s: AiSettings) => s.anthropic_key_configured,
+  },
+  {
+    id: "openrouter",
+    label: "OpenRouter (Jev)",
+    envVar: "OPENROUTER_API_KEY",
+    keyConfigured: (s: AiSettings) => s.openrouter_key_configured,
+  },
+] as const;
 
-function KeyStatus({ configured, providerLabel }: { configured: boolean; providerLabel: string }) {
+function formatPrice(value: number): string {
+  if (value === 0) return "free";
+  return `$${value < 0.1 ? value.toFixed(3) : value.toFixed(2)}`;
+}
+
+function formatEstimate(value: number): string {
+  return value < 0.01 ? "< $0.01" : `$${value.toFixed(2)}`;
+}
+
+function KeyStatus({ configured, envVar }: { configured: boolean; envVar: string }) {
   if (configured) {
     return <span className="key-status key-status-ok">API key configured</span>;
   }
-  const envVar = providerLabel === "OpenAI" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
   return (
     <span className="key-status key-status-missing">
       Not configured — set {envVar} in your environment
     </span>
+  );
+}
+
+function SectionHeader({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="settings-section-header">
+      <h3>{title}</h3>
+      <p>{description}</p>
+    </div>
   );
 }
 
@@ -135,149 +165,171 @@ export default function SettingsPage() {
 
   if (!settings || !catalog) return <Card>Loading...</Card>;
 
-  const currentModelId = provider === "anthropic" ? anthropicModel : openaiModel;
-  const currentModels = catalog.providers[provider as "openai" | "anthropic"];
-  const currentModelInfo = currentModels.find((m) => m.id === currentModelId);
+  const providerInfo = PROVIDERS.find((p) => p.id === provider) ?? PROVIDERS[0];
+  const isJev = provider === "openrouter";
+  const currentModels = catalog.providers[provider] ?? [];
+  const currentModelId =
+    provider === "anthropic" ? anthropicModel : provider === "openai" ? openaiModel : settings.openrouter_model;
+  const currentModelInfo = currentModels.find((m) => m.id === currentModelId) ?? currentModels[0];
+
+  const pricingLine = currentModelInfo
+    ? `${formatPrice(currentModelInfo.input_per_1m)} in / ${formatPrice(currentModelInfo.output_per_1m)} out per 1M tokens · est. ${formatEstimate(currentModelInfo.est_cost_per_1000_txns)} per 1,000 transactions`
+    : null;
 
   return (
-    <div>
-      <PageHeader title="Settings" actions={<span className="dash-period">AI Categorization</span>} />
+    <div className="settings-page">
+      <PageHeader title="Settings" />
 
-      <div className="settings-content">
-        <Card className="settings-grid">
-          <div className="settings-field">
-            <label className="settings-label" htmlFor="provider-select">
-              AI Provider
-            </label>
-            <select
-              id="provider-select"
-              value={provider}
-              onChange={(e) => setProvider(e.target.value)}
-            >
-              <option value="openai">OpenAI</option>
-              <option value="anthropic">Claude (Anthropic)</option>
-            </select>
-          </div>
+      <Card>
+        <SectionHeader
+          title="AI categorization"
+          description="Which provider categorizes imported transactions and the uncategorized backlog."
+        />
 
-          <div className="settings-field">
-            <span className="settings-label">API key status</span>
-            <div className="key-status-row">
-              <KeyStatus configured={settings.openai_key_configured} providerLabel="OpenAI" />
-              <KeyStatus configured={settings.anthropic_key_configured} providerLabel="Claude (Anthropic)" />
-            </div>
-          </div>
+        <Field label="AI provider" htmlFor="provider-select">
+          <select
+            id="provider-select"
+            className="form-control"
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+          >
+            {PROVIDERS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </Field>
 
-          <div className="settings-field">
-            <label className="settings-label" htmlFor="model-select">
-              Model ({PROVIDER_LABELS[provider]})
-            </label>
+        <Field label="API key">
+          <KeyStatus configured={providerInfo.keyConfigured(settings)} envVar={providerInfo.envVar} />
+        </Field>
+
+        <Field
+          label="Model"
+          htmlFor="model-select"
+          hint={
+            <>
+              {isJev && (
+                <span className="form-hint-line">
+                  Jev classifies each transaction on its own, line by line. Lines it isn't confident about
+                  stay Uncategorized so you can review them.
+                </span>
+              )}
+              {pricingLine && <span className="form-hint-line">{pricingLine}</span>}
+            </>
+          }
+        >
+          {isJev ? (
+            <input
+              id="model-select"
+              className="form-control"
+              readOnly
+              value={currentModelInfo?.label ?? settings.openrouter_model}
+            />
+          ) : (
             <select
               id="model-select"
+              className="form-control"
               value={currentModelId}
               onChange={(e) =>
-                provider === "anthropic"
-                  ? setAnthropicModel(e.target.value)
-                  : setOpenaiModel(e.target.value)
+                provider === "anthropic" ? setAnthropicModel(e.target.value) : setOpenaiModel(e.target.value)
               }
             >
               {currentModels.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {m.label} — ${m.input_per_1m.toFixed(2)}/$
-                  {m.output_per_1m.toFixed(2)} per 1M tokens (in/out)
+                  {m.label}
                 </option>
               ))}
             </select>
-            {currentModelInfo && (
-              <div className="settings-model-option">
-                Estimated cost: ${currentModelInfo.est_cost_per_1000_txns.toFixed(2)} per 1,000 categorized
-                transactions.
-              </div>
-            )}
-          </div>
+          )}
+        </Field>
 
-          <div className="settings-field">
-            <Button onClick={handleSave} disabled={saving}>
-              {saving ? "Saving..." : "Save"}
-            </Button>
-            {saved && !saving && <span className="settings-saved">Saved.</span>}
-          </div>
-        </Card>
+        <div className="settings-actions">
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? "Saving..." : "Save"}
+          </Button>
+          {saved && !saving && <span className="settings-saved">Saved.</span>}
+        </div>
+      </Card>
 
-        <Card className="settings-grid">
-          <div className="settings-field">
-            <label className="settings-label" htmlFor="recurring-threshold-input">
-              Recurring large-expense threshold (base currency)
-            </label>
-            <input
-              id="recurring-threshold-input"
-              type="number"
-              min="0.01"
-              step="0.01"
-              value={recurringThreshold}
-              onChange={(e) => setRecurringThreshold(e.target.value)}
-            />
-            <div className="settings-model-option">
-              A merchant that recurs across 3+ months at or above this amount shows up as a
-              recurring large expense on the Analysis page, with a warning if the amount changes.
-            </div>
-          </div>
+      <Card>
+        <SectionHeader
+          title="Recurring expenses"
+          description="When a repeating merchant counts as a large recurring expense."
+        />
 
-          <div className="settings-field">
-            <Button onClick={handleSaveRecurring} disabled={recurringSaving}>
-              {recurringSaving ? "Saving..." : "Save"}
-            </Button>
-            {recurringSaved && !recurringSaving && <span className="settings-saved">Saved.</span>}
-            {recurringError && <span className="key-status key-status-missing">{recurringError}</span>}
-          </div>
-        </Card>
+        <Field
+          label="Recurring large-expense threshold (base currency)"
+          htmlFor="recurring-threshold-input"
+          hint="A merchant that recurs across 3+ months at or above this amount shows up as a recurring large expense on the Analysis page, with a warning if the amount changes."
+        >
+          <input
+            id="recurring-threshold-input"
+            className="form-control"
+            type="number"
+            min="0.01"
+            step="0.01"
+            value={recurringThreshold}
+            onChange={(e) => setRecurringThreshold(e.target.value)}
+          />
+        </Field>
 
-        <Card>
-          <h3>Upload History</h3>
-          <TableContainer className="settings-upload-table">
-            <table>
-              <thead>
-                <tr>
-                  <th>Uploaded</th>
-                  <th>File</th>
-                  <th>Bank/Format</th>
-                  <th>Parsed</th>
-                  <th>Imported</th>
-                  <th>Skipped</th>
-                  <th>Status</th>
+        <div className="settings-actions">
+          <Button onClick={handleSaveRecurring} disabled={recurringSaving}>
+            {recurringSaving ? "Saving..." : "Save"}
+          </Button>
+          {recurringSaved && !recurringSaving && <span className="settings-saved">Saved.</span>}
+          {recurringError && <span className="key-status key-status-missing">{recurringError}</span>}
+        </div>
+      </Card>
+
+      <Card>
+        <SectionHeader title="Upload history" description="Recent CSV imports and their outcome." />
+        <TableContainer className="settings-upload-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Uploaded</th>
+                <th>File</th>
+                <th>Bank/Format</th>
+                <th>Parsed</th>
+                <th>Imported</th>
+                <th>Skipped</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((log) => (
+                <tr key={log.id}>
+                  <td>{new Date(log.uploaded_at).toLocaleString("en-GB")}</td>
+                  <td>{log.filename}</td>
+                  <td>{log.bank || log.format_detected || "-"}</td>
+                  <td>{log.rows_parsed}</td>
+                  <td>{log.rows_imported}</td>
+                  <td>{log.rows_skipped}</td>
+                  <td>
+                    {log.status === "success" ? (
+                      "Success"
+                    ) : (
+                      <span title={log.error ?? undefined}>
+                        Failed{log.error ? `: ${log.error}` : ""}
+                      </span>
+                    )}
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {logs.map((log) => (
-                  <tr key={log.id}>
-                    <td>{new Date(log.uploaded_at).toLocaleString("en-GB")}</td>
-                    <td>{log.filename}</td>
-                    <td>{log.bank || log.format_detected || "-"}</td>
-                    <td>{log.rows_parsed}</td>
-                    <td>{log.rows_imported}</td>
-                    <td>{log.rows_skipped}</td>
-                    <td>
-                      {log.status === "success" ? (
-                        "Success"
-                      ) : (
-                        <span title={log.error ?? undefined}>
-                          Failed{log.error ? `: ${log.error}` : ""}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-                {logs.length === 0 && (
-                  <tr>
-                    <td colSpan={7} className="empty-state">
-                      No uploads yet.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </TableContainer>
-        </Card>
-      </div>
+              ))}
+              {logs.length === 0 && (
+                <tr>
+                  <td colSpan={7} className="empty-state">
+                    No uploads yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </TableContainer>
+      </Card>
     </div>
   );
 }

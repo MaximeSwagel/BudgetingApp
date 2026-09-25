@@ -255,6 +255,7 @@ body {
 
 select,
 .filters input,
+.form-control,
 .year-selector select {
   padding: var(--space-2) var(--space-3);
   border: 1px solid var(--color-border-strong);
@@ -267,12 +268,14 @@ select,
 }
 
 select:hover,
-.filters input:hover {
+.filters input:hover,
+.form-control:hover {
   border-color: var(--color-text-tertiary);
 }
 
 select:focus-visible,
-.filters input:focus-visible {
+.filters input:focus-visible,
+.form-control:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 1px;
 }
@@ -1186,26 +1189,31 @@ tbody tr:hover {
 
 /* ---------- Settings ---------- */
 
-.settings-content {
-  max-width: 640px;
+.settings-page {
+  max-width: var(--settings-max-width);
+  margin-inline: auto;
 }
 
-.settings-grid {
-  display: grid;
-  gap: var(--space-2);
+.settings-section-header {
+  margin-bottom: var(--space-5);
 }
 
-.settings-field {
-  margin-bottom: var(--space-6);
+.settings-section-header h3 {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
 }
 
-.settings-field:last-child {
-  margin-bottom: 0;
-  border-top: 1px solid var(--hairline);
-  padding-top: var(--space-6);
+.settings-section-header p {
+  margin-top: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
 }
 
-.settings-label {
+.form-field + .form-field {
+  margin-top: var(--space-5);
+}
+
+.form-label {
   display: block;
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
@@ -1214,23 +1222,49 @@ tbody tr:hover {
   margin-bottom: var(--space-2);
 }
 
-.settings-model-option {
+.form-control {
   display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.form-control[readonly] {
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+}
+
+.form-control[readonly]:hover {
+  border-color: var(--color-border-strong);
+}
+
+.form-hint {
+  margin-top: var(--space-2);
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
-  margin-top: var(--space-2);
+}
+
+.form-hint-line {
+  display: block;
+}
+
+.form-hint-line + .form-hint-line {
+  margin-top: var(--space-1);
+}
+
+.settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+  padding-top: var(--space-5);
+  border-top: 1px solid var(--hairline);
 }
 
 .settings-saved {
-  margin-left: var(--space-3);
   color: var(--color-success-strong);
   font-size: var(--text-sm);
-}
-
-.key-status-row {
-  display: flex;
-  gap: var(--space-3);
-  flex-wrap: wrap;
 }
 
 .key-status {

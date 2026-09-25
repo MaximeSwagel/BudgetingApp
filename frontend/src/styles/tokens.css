@@ -83,6 +83,7 @@
 
   /* Layout */
   --content-max-width: 1400px;
+  --settings-max-width: 800px;
   --nav-height: 56px;
 
   /* Breakpoints (referenced in comments -- CSS custom properties cannot be
