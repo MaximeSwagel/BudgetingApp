@@ -1,6 +1,10 @@
-# App instance: public web traffic only. No SSH port open — shell access goes
-# through SSM Session Manager (via the instance IAM role), so there's no key to
-# manage and nothing to brute-force on port 22.
+# App instance: public web traffic on 80, 443 and 8080 (dev frontend).
+# Shell access goes primarily through SSM Session Manager via the instance IAM
+# role, with no key and no open port.
+# SSH on tcp/22 is optional and off by default: the rule below exists only when
+# var.ssh_allowed_cidr is set; see terraform.tfvars.example.
+# The live rule was first added by hand in the console on 2026-08-01 and is now
+# written in code.
 resource "aws_security_group" "app" {
   name        = "${var.project_name}-app-sg"
   description = "Allow inbound HTTP/HTTPS, all outbound"
@@ -28,6 +32,17 @@ resource "aws_security_group" "app" {
     to_port     = 8080
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  dynamic "ingress" {
+    for_each = var.ssh_allowed_cidr == "" ? [] : [var.ssh_allowed_cidr]
+    content {
+      description = "SSH"
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      cidr_blocks = [ingress.value]
+    }
   }
 
   egress {

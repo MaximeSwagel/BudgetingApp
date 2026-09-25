@@ -11,7 +11,9 @@ resource "aws_iam_role" "app_instance" {
   })
 }
 
-# SSM Session Manager + Run Command access (no SSH key/port needed).
+# SSM Session Manager plus Run Command is the primary shell and deploy path:
+# CI deploys via ssm:SendCommand and needs no SSH key or open port. SSH is an
+# optional extra controlled by ssh_allowed_cidr and ssh_public_key.
 resource "aws_iam_role_policy_attachment" "ssm" {
   role       = aws_iam_role.app_instance.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
@@ -44,12 +46,26 @@ resource "aws_iam_instance_profile" "app_instance" {
   role = aws_iam_role.app_instance.name
 }
 
+# cloud-init installs this key at launch. That replaces the hand-edited
+# authorized_keys the previous host relied on, so SSH access carries over when
+# the instance is replaced.
+resource "aws_key_pair" "ssh" {
+  count      = var.ssh_public_key != "" ? 1 : 0
+  key_name   = "${var.project_name}-ssh"
+  public_key = var.ssh_public_key
+
+  tags = {
+    Name = "${var.project_name}-ssh"
+  }
+}
+
 resource "aws_instance" "app" {
   ami                    = data.aws_ami.al2023.id
   instance_type          = var.app_instance_type
   subnet_id              = data.aws_subnets.default.ids[0]
   vpc_security_group_ids = [aws_security_group.app.id]
   iam_instance_profile   = aws_iam_instance_profile.app_instance.name
+  key_name               = one(aws_key_pair.ssh[*].key_name)
 
   user_data = templatefile("${path.module}/user_data.sh.tpl", {
     aws_region          = var.aws_region
@@ -68,6 +84,16 @@ resource "aws_instance" "app" {
 
   tags = {
     Name = "${var.project_name}-app"
+  }
+
+  # The AMI comes from a most_recent lookup that moves with every AL2023
+  # release. Without ignore_changes, any plan after a new release would destroy
+  # and recreate the host. A newer AMI is only picked up when the instance is
+  # replaced for another reason (a user_data or key_name change), or
+  # deliberately via `terraform apply -replace=aws_instance.app`. A replacement
+  # launches with whatever the lookup currently returns.
+  lifecycle {
+    ignore_changes = [ami]
   }
 }
 

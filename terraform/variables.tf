@@ -59,3 +59,25 @@ variable "anthropic_api_key" {
   default     = ""
   sensitive   = true
 }
+
+variable "ssh_allowed_cidr" {
+  description = "Single IPv4 CIDR allowed to reach tcp/22 on the app instance. Empty means no port-22 rule at all, and SSM Session Manager remains the primary shell path. Set it in the git-ignored terraform/terraform.tfvars or via TF_VAR_ssh_allowed_cidr, and never commit it."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.ssh_allowed_cidr == "" || (can(cidrnetmask(var.ssh_allowed_cidr)) && !endswith(var.ssh_allowed_cidr, "/0"))
+    error_message = "ssh_allowed_cidr must be empty or a single IPv4 CIDR such as 203.0.113.10/32, and a /0 range is refused because it would expose SSH to the whole internet."
+  }
+}
+
+variable "ssh_public_key" {
+  description = "OpenSSH public key line (the contents of a .pub file). It is registered as an EC2 key pair and attached to the app instance at launch, so SSH access survives instance replacement. Empty means no key pair. EC2 key pairs only take effect at launch, so setting or clearing this value forces instance replacement; to close SSH temporarily, clear ssh_allowed_cidr instead (an in-place SG change). Set it via terraform.tfvars or TF_VAR_ssh_public_key."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.ssh_public_key == "" || can(regex("^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/]+=*( .*)?$", var.ssh_public_key))
+    error_message = "ssh_public_key must be empty or a single-line OpenSSH public key such as ssh-ed25519 AAAA... comment."
+  }
+}

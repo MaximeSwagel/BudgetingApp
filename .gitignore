@@ -26,3 +26,5 @@ terraform/*.tfstate.*
 terraform/*.tfplan
 terraform/tfplan*
 terraform/*.auto.tfvars
+terraform/*.tfvars
+terraform/*.tfvars.json
