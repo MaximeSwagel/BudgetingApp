@@ -70,9 +70,11 @@ Compose you would need to supply:
 
 Setting the `openrouter_api_key` Terraform variable changes the rendered user-data, and `ec2.tf` sets
 `user_data_replace_on_change = true`, so applying it **replaces the EC2 instance**. To avoid that, add
-`OPENROUTER_API_KEY=...` to `/opt/budgetingapp/.env` and `/opt/budgetingapp-dev/.env` on the host, add
-`OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}` to the backend environment in both `docker-compose.yml` files,
-then run `docker compose up -d` in each directory. Note that per-line Jev classification of a very large
+`OPENROUTER_API_KEY=...` to `/opt/budgetingapp/.env` and `/opt/budgetingapp-dev/.env` on the host, then run
+`docker compose up -d` in each directory. The generated compose files load the backend's environment with
+`env_file: .env`, so any new setting only needs a line in `.env`. Instances launched before that change still
+list variables one by one under `environment:`; on those, replace the backend's `environment:` block with
+`env_file: .env` (or add the missing line) before restarting. Note that per-line Jev classification of a very large
 upload can take longer than batched LLM calls.
 
 ## Rollback Procedure

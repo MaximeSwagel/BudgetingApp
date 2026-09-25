@@ -45,12 +45,7 @@ services:
   backend:
     image: ${ecr_backend}:$${IMAGE_TAG}
     restart: unless-stopped
-    environment:
-      DATABASE_URL: $${DATABASE_URL}
-      OPENAI_API_KEY: $${OPENAI_API_KEY}
-      ANTHROPIC_API_KEY: $${ANTHROPIC_API_KEY}
-      OPENROUTER_API_KEY: $${OPENROUTER_API_KEY}
-      BASE_CURRENCY: $${BASE_CURRENCY}
+    env_file: .env
     networks: [app]
 
   frontend:
@@ -111,13 +106,7 @@ services:
   backend:
     image: ${ecr_backend}:$${IMAGE_TAG}
     restart: unless-stopped
-    environment:
-      DATABASE_URL: $${DATABASE_URL}
-      OPENAI_API_KEY: $${OPENAI_API_KEY}
-      ANTHROPIC_API_KEY: $${ANTHROPIC_API_KEY}
-      OPENROUTER_API_KEY: $${OPENROUTER_API_KEY}
-      BASE_CURRENCY: $${BASE_CURRENCY}
-      ALLOW_DATA_RESET: $${ALLOW_DATA_RESET:-false}
+    env_file: .env
     networks: [app]
 
   frontend:
