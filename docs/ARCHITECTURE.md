@@ -87,7 +87,9 @@ A typical CSV import request flows through the system as follows:
 4. **Categorization** — The parsed transactions are passed to `categorize_transactions()`
    (`backend/app/services/classifier.py`), which hands them to the agent selected by the persisted
    `ai_provider` and gets back a `general_category` (category group) and `precise_category` (category) per
-   transaction from the fixed `CATEGORY_HIERARCHY`. If the active provider's key is not configured, or its
+   transaction. The hierarchy is loaded from the `category_groups`/`categories` tables on every call by
+   `load_category_hierarchy()` (`backend/app/services/taxonomy.py`), so Budget-page additions and renames apply
+   on the next upload. If the active provider's key is not configured, or its
    calls fail, the affected transactions fall back to `"Uncategorized"`. See "Categorization agents" below.
 5. **Currency conversion** — For each transaction not already in the base currency (`"ILS"`, hardcoded in
    `upload.py`), `convert_amount()` (`backend/app/services/currency.py`) calls the Frankfurter API
@@ -120,15 +122,20 @@ A typical CSV import request flows through the system as follows:
 `settings.ai_provider` in `AGENT_REGISTRY` (`agents/registry.py`) on every call, so a provider change on the
 Settings page applies without a restart. An unknown value falls back to OpenAI.
 
-- **Contract:** `CategorizationAgent.classify(transactions) -> list[dict]` returns one
-  `{general_category, precise_category, [confidence]}` per input, in order and same length. The classifier pads,
+- **Contract:** `CategorizationAgent.classify(transactions, categories) -> list[dict]` returns one
+  `{general_category, precise_category, [confidence]}` per input, in order and same length. `categories` is an
+  ordered `{group: [subcategory, ...]}` dict supplied by the classifier (display order); agents never touch the
+  DB, and groups without subcategories are not offered. An empty hierarchy skips the agent
+  (`skipped=no_categories`). The classifier pads,
   truncates and replaces malformed items, and turns an agent exception into all-`Uncategorized`.
 - **LLM agents** (`OpenAiAgent`, `AnthropicAgent` in `agents/llm.py`): one batched prompt per 30 transactions.
 - **Jev agent** (`agents/jev.py`): classifies each line on its own with OpenRouter's Jev decision model. Two
   sequential Decisions calls per line, first the budget group (plus an "other" option), then a sub-category
   offered only from that group; they cannot be one request because questions in a request cannot see each
   other's answers. A step whose confidence is below `JEV_CONFIDENCE_THRESHOLD` (default 0.6) leaves the line
-  `Uncategorized`. Lines run 8 at a time with a 20s timeout, retry on 429/5xx with capped backoff, and a failing
+  `Uncategorized`. Options are built per call from `categories`; past the 255-option cap (254 groups plus
+  "other", or 255 sub-categories) they are truncated in display order with an `event=agent_taxonomy` warning.
+  Lines run 8 at a time with a 20s timeout, retry on 429/5xx with capped backoff, and a failing
   line never fails the request. An auth error (401/402/403) skips the remaining lines.
 - **Run stats:** an agent may set `last_run_stats` (a small dict of counts and scores) at the end of `classify`.
   The classifier sanitizes it (whitelisted keys, numeric values only) and appends it to the `llm_categorize` log
@@ -137,7 +144,11 @@ Settings page applies without a restart. An unknown value falls back to OpenAI.
   the full inputs and outputs of every agent call, joinable to stdout by `run_id`. Off by default; see
   [CONFIGURATION.md](CONFIGURATION.md#agent-trace-logs).
 - **Seam, not built:** `JevAgent._unresolved()` is where an LLM fallback or a composite agent would plug in.
-  Registry factories are zero-argument callables, so a composite's factory can call `build_agent()`.
+  Registry factories are zero-argument callables, so a composite's factory can call `build_agent()`. A composite
+  agent receives `categories` and passes the same value to its inner agents.
+- **Fallback telemetry:** when an agent answers with a valid group but an unknown sub-category, the row is still
+  filed under the group's first category, and each upload or auto-categorize run logs one
+  `event=category_fallback` warning with counts only.
 - All Decisions wire-format knowledge (URL, model alias, request/response shape) is isolated in
   `services/openrouter_client.py`, because the endpoint is alpha.
 
@@ -147,7 +158,8 @@ Settings page applies without a restart. An unknown value falls back to OpenAI.
 |---|---|---|
 | `Transaction` model | `backend/app/models/transaction.py` | Central record: original amount/currency, converted amount/rate/base currency, bank, category link, duplicate flag, expense flag. Uses `Numeric(12,2)` (not `float`) for all money columns. |
 | `ImportBatch` model | `backend/app/models/transaction.py` | Groups transactions by upload event (filename, bank, timestamp, count) for traceability of each CSV import. |
-| `Category` / `CategoryGroup` models | `backend/app/models/transaction.py` | Two-level budget hierarchy (e.g., group `"Home Expenses"` → category `"Rent"`) mirroring the user's Excel budget structure. Seeded on startup from `SEED_CATEGORIES` in `main.py`. |
+| `Category` / `CategoryGroup` models | `backend/app/models/transaction.py` | Two-level budget hierarchy (e.g., group `"Home Expenses"` → category `"Rent"`) mirroring the user's Excel budget structure. Seeded on startup from `SEED_CATEGORIES` in `main.py`; seeding only bootstraps the tables, which are the source of truth for categorization. |
+| `load_category_hierarchy()` | `backend/app/services/taxonomy.py` | Reads the group/category tables into an ordered `{group: [category, ...]}` dict (by `display_order`, then id) on every categorize call; nothing is cached. |
 | `CategoryGroupTarget` model | `backend/app/models/transaction.py` | A single current target amount per primary category (`CategoryGroup`), applying to every month shown, past and future, joined against actual spend in the budget summary endpoint. `amount` is nullable, meaning "cleared". `effective_month` records which month a row was written against and is retained as groundwork for possible future versioning, but is not consulted on read -- only the most recently written row per group is used. |
 | Bank parser functions | `backend/app/parsers/revolut.py`, `backend/app/parsers/ca.py` | Each bank/format has its own pure function (`content: bytes -> list[dict]`) that normalizes rows into a common transaction-dict shape, isolating bank-specific CSV quirks (delimiters, encodings, multi-line wrapped labels for Crédit Agricole). |
 | `detect_bank_format()` | `backend/app/parsers/detector.py` | Single dispatch point that inspects CSV header content to pick the correct parser, raising `ValueError` on unrecognized formats. |

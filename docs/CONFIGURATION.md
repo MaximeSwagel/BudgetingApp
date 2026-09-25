@@ -56,7 +56,8 @@ consumed directly in `frontend/vite.config.ts` via `process.env.VITE_API_URL`.
 - The API key of the active AI provider (`ai_provider`: `openai`, `anthropic` or `openrouter`, chosen on the
   Settings page) is functionally required for AI categorization. Without it,
   `categorize_transactions()` in `backend/app/services/classifier.py` short-circuits and labels every
-  transaction `Uncategorized` rather than raising an error.
+  transaction `Uncategorized` rather than raising an error. It does the same (`skipped=no_categories`) when the
+  category tables hold no group with a sub-category.
 - `DATABASE_URL` defaults to a local SQLite file (`budgetingapp.db`), which is sufficient for the bundled
   `sqlite+aiosqlite` driver but is overridden to Postgres whenever running via Docker Compose.
 - `VITE_API_URL` only affects the frontend dev server proxy; if unset, it falls back to
@@ -123,11 +124,12 @@ categorize call (one CSV upload) and is also printed as `run=<id>` at the end of
 |-------|------------|---------|--------------|
 | `group`, `category` | Jev | Decisions call | `line`, `input` (`state` sent + `options` offered), `output` (`choice`, `confidence`, `top` = top-3 `[key, prob]`, or null on error), `ms`, `queue_ms` (wait on the concurrency semaphore; 0 on `category`), `attempts`, `status` (`ok` or exception class), `status_code`, `cost`, `decision`, `threshold` |
 | `line` | Jev | input transaction | `line`, `input.state`, `group`, `category`, `group_score`, `category_score` (null when not reached), `decision`, `threshold`, `queue_ms`, `total_ms`, `cost` (sum of both calls) |
-| `batch` | OpenAI, Anthropic | batch of up to 30 | `batch` (`i/n`), `size`, `prompt_hash`, `input.prompt` (exact prompt), `output` (`results` parsed, `raw` text; null on error), `padded`, `ms`, `attempts` (null: SDK retries are internal), `status`, `status_code`, `cost` (null), `usage` (`input_tokens`, `output_tokens`, or null) |
-| `run` | any | categorize call | `rows`, `uncategorized`, `stats`, `ms`, `status` (`ok`, `no_api_key` or exception class) |
+| `batch` | OpenAI, Anthropic | batch of up to 30 | `batch` (`i/n`), `size`, `prompt_hash`, `taxonomy_hash`, `input.prompt` (exact prompt), `output` (`results` parsed, `raw` text; null on error), `padded`, `ms`, `attempts` (null: SDK retries are internal), `status`, `status_code`, `cost` (null), `usage` (`input_tokens`, `output_tokens`, or null) |
+| `run` | any | categorize call | `rows`, `uncategorized`, `stats`, `ms`, `status` (`ok`, `no_api_key`, `no_categories` or exception class), `taxonomy_hash` (null for `no_api_key`) |
 
-`prompt_hash` is the first 12 hex of the sha256 of the prompt template with the category list, so it changes only
-when the template or the categories change.
+`prompt_hash` is the first 12 hex of the sha256 of the prompt template alone, without the category text or the
+transactions. `taxonomy_hash` is the first 12 hex of the sha256 of the ordered category hierarchy; it changes when
+a category is added, renamed, removed or reordered.
 
 Jev `decision` values: `accepted` (line categorized), `other` (group step chose "other"), `group_low`
 (group confidence under the threshold), `category_low` (sub-category confidence under it), `error`, `auth`
@@ -143,3 +145,7 @@ The agent fields are counts and scores only, never text:
   `group_score_min/p50/max` over every line that got a group answer and `cat_score_min/p50/max` over every
   sub-category answer.
 - OpenAI / Anthropic: `batches`, `failed_batches`, `padded` (results the model omitted, filled `Uncategorized`).
+- `event=category_fallback source=<upload|auto_categorize> rows=<n> unknown_category=<n> empty_group=<n> unknown_group=<n>`
+  (WARNING): counts of answers repaired or dropped when resolving to a stored category; never names.
+- `event=agent_taxonomy provider=<p> ok=false reason=<empty|group_cap|category_cap>` (WARNING): the hierarchy was
+  empty or exceeded Jev's option cap; counts only.
