@@ -130,6 +130,12 @@ Settings page applies without a restart. An unknown value falls back to OpenAI.
   other's answers. A step whose confidence is below `JEV_CONFIDENCE_THRESHOLD` (default 0.6) leaves the line
   `Uncategorized`. Lines run 8 at a time with a 20s timeout, retry on 429/5xx with capped backoff, and a failing
   line never fails the request. An auth error (401/402/403) skips the remaining lines.
+- **Run stats:** an agent may set `last_run_stats` (a small dict of counts and scores) at the end of `classify`.
+  The classifier sanitizes it (whitelisted keys, numeric values only) and appends it to the `llm_categorize` log
+  line together with a per-call `run=<id>`.
+- **Trace files:** when `AGENT_LOG_DIR` is set, `app/agent_trace.py` writes per-provider JSON-lines files with
+  the full inputs and outputs of every agent call, joinable to stdout by `run_id`. Off by default; see
+  [CONFIGURATION.md](CONFIGURATION.md#agent-trace-logs).
 - **Seam, not built:** `JevAgent._unresolved()` is where an LLM fallback or a composite agent would plug in.
   Registry factories are zero-argument callables, so a composite's factory can call `build_agent()`.
 - All Decisions wire-format knowledge (URL, model alias, request/response shape) is isolated in

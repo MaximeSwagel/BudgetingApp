@@ -77,6 +77,34 @@ list variables one by one under `environment:`; on those, replace the backend's 
 `env_file: .env` (or add the missing line) before restarting. Note that per-line Jev classification of a very large
 upload can take longer than batched LLM calls.
 
+### Agent trace logs on the dev instance
+
+New instances get this from `terraform/user_data.sh.tpl` (an `agent-logs` bind mount in both compose files,
+`AGENT_LOG_DIR=/app/agent-logs` in the dev `.env` only). Applying the template change to the running host would
+replace the instance, so on the existing dev host do it by hand:
+
+```bash
+sudo install -d -m 700 /opt/budgetingapp-dev/agent-logs
+# add under the backend service in /opt/budgetingapp-dev/docker-compose.yml:
+#     volumes:
+#       - ./agent-logs:/app/agent-logs
+echo 'AGENT_LOG_DIR=/app/agent-logs' | sudo tee -a /opt/budgetingapp-dev/.env
+cd /opt/budgetingapp-dev && sudo docker compose up -d
+```
+
+The container runs as root, so the root-owned `0700` directory is writable by the app; reading it needs `sudo`.
+Deploys only rewrite `IMAGE_TAG`, so these edits persist. Prod stays off.
+
+```bash
+sudo tail -f /opt/budgetingapp-dev/agent-logs/openrouter.log | jq .
+# one upload: take the run=<id> from `docker logs` (event=llm_categorize)
+sudo jq 'select(.run_id=="<id>")' /opt/budgetingapp-dev/agent-logs/openrouter.log
+# why lines ended Uncategorized
+sudo jq -r 'select(.stage=="line") | .decision' /opt/budgetingapp-dev/agent-logs/openrouter.log | sort | uniq -c
+```
+
+Field reference and privacy notes: [CONFIGURATION.md](CONFIGURATION.md#agent-trace-logs).
+
 ## Rollback Procedure
 
 No rollback procedure is documented or automated in the repository, since no CI/CD pipeline or
@@ -95,6 +123,9 @@ hosting platform is configured. Until one exists, the general approach for local
 <!-- VERIFY: No backup/restore strategy for the `pgdata` Docker volume exists in the repository — confirm whether the local Postgres volume is backed up anywhere before relying on it for anything beyond disposable local development data. -->
 
 ## Monitoring
+
+The backend prints single-line `event=` lines to stdout (`docker logs`); for per-call agent detail see
+[Agent trace logs on the dev instance](#agent-trace-logs-on-the-dev-instance).
 
 No monitoring, logging, or error-tracking integration is configured. No monitoring-related
 dependencies (e.g., `@sentry/*`, `dd-trace`, `newrelic`, `@opentelemetry/*`) appear in

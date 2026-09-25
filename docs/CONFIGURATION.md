@@ -15,6 +15,7 @@ config file — backend settings are defined and validated in `backend/app/confi
 | `ANTHROPIC_API_KEY` | Optional (needed when the active provider is Anthropic) | `""` (empty) | Anthropic API key used by the Anthropic agent (`backend/app/services/agents/llm.py`). |
 | `OPENROUTER_API_KEY` | Optional (needed when the active provider is OpenRouter) | `""` (empty) | OpenRouter API key used by the Jev agent (`backend/app/services/agents/jev.py`). Env-only: it is never stored in the database or returned by the API. |
 | `JEV_CONFIDENCE_THRESHOLD` | Optional | `0.6` | Minimum Jev confidence (per step: group, then sub-category) for a line to receive a category. Lines below it stay `Uncategorized`. |
+| `AGENT_LOG_DIR` | Optional | `""` (empty = off) | Directory for per-provider agent trace files (`openrouter.log`, `openai.log`, `anthropic.log`). The files contain financial data, so leave it unset unless you control the host. See [Agent trace logs](#agent-trace-logs). |
 | `BASE_CURRENCY` | Optional | `ILS` | Target currency defined in `Settings.base_currency` (`backend/app/config.py`) for currency conversion. <!-- VERIFY: backend/app/routers/upload.py currently hardcodes `base_currency = "ILS"` locally and does not read this setting, so changing `BASE_CURRENCY` has no effect on the upload flow as of this writing --> |
 | `VITE_API_URL` | Optional | `http://localhost:8000` | Backend URL used by the Vite dev server proxy (`frontend/vite.config.ts`) to forward `/api` requests. In `docker-compose.yml` this is set to `http://backend:8000` so the frontend container can reach the backend container by service name. |
 
@@ -35,6 +36,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     openrouter_api_key: str = ""
     jev_confidence_threshold: float = 0.6
+    agent_log_dir: str = ""
     base_currency: str = "ILS"
 
     model_config = {"env_file": ".env"}
@@ -70,6 +72,7 @@ consumed directly in `frontend/vite.config.ts` via `process.env.VITE_API_URL`.
 | `anthropic_api_key` | `""` | `backend/app/config.py` |
 | `openrouter_api_key` | `""` | `backend/app/config.py` |
 | `jev_confidence_threshold` | `0.6` | `backend/app/config.py` |
+| `agent_log_dir` | `""` (tracing off) | `backend/app/config.py` |
 | `base_currency` | `ILS` | `backend/app/config.py` |
 | `VITE_API_URL` | `http://localhost:8000` | `frontend/vite.config.ts` |
 
@@ -94,3 +97,49 @@ Two runtime environments exist today: local host development and Docker Compose.
 
 There are no separate `.env.development`, `.env.production`, or `.env.test` files in the repository, and no
 `NODE_ENV`/environment-conditional branching was found in the backend or frontend configuration code.
+
+## Agent trace logs
+
+Set `AGENT_LOG_DIR` to write one JSON-lines trace file per categorization provider, next to the normal stdout
+events: `openrouter.log` (Jev), `openai.log` and `anthropic.log`. Leave it unset or empty (the default) and
+nothing is written anywhere. Prod keeps it off; the dev instance turns it on (see
+[DEPLOYMENT.md](DEPLOYMENT.md#agent-trace-logs-on-the-dev-instance)).
+
+**Privacy warning.** Unlike stdout, these files hold descriptions, amounts, currencies, banks, the exact LLM
+prompts and the model outputs. Enable them only on a host you control, never in prod by default, and never commit
+or share them. API keys and Authorization headers are never written. The directory is created `0700` and the
+files are `0600`. `agent-logs/` is gitignored.
+
+Each file rotates at 10 MB and keeps 5 backups (`openai.log.1` to `openai.log.5`). A trace problem (unwritable
+directory, disk error) never fails an upload: the app emits one `event=agent_trace ok=false disabled=true
+error=<ExceptionClass>` warning and stops tracing until the process restarts.
+
+Every record carries `ts` (UTC ISO ms `Z`), `run_id`, `provider`, `model` and `stage`. `run_id` is one id per
+categorize call (one CSV upload) and is also printed as `run=<id>` at the end of that call's
+`event=llm_categorize` stdout line, so a console line joins to its trace records with
+`jq 'select(.run_id=="<id>")'`.
+
+| Stage | Written by | One per | Extra fields |
+|-------|------------|---------|--------------|
+| `group`, `category` | Jev | Decisions call | `line`, `input` (`state` sent + `options` offered), `output` (`choice`, `confidence`, `top` = top-3 `[key, prob]`, or null on error), `ms`, `queue_ms` (wait on the concurrency semaphore; 0 on `category`), `attempts`, `status` (`ok` or exception class), `status_code`, `cost`, `decision`, `threshold` |
+| `line` | Jev | input transaction | `line`, `input.state`, `group`, `category`, `group_score`, `category_score` (null when not reached), `decision`, `threshold`, `queue_ms`, `total_ms`, `cost` (sum of both calls) |
+| `batch` | OpenAI, Anthropic | batch of up to 30 | `batch` (`i/n`), `size`, `prompt_hash`, `input.prompt` (exact prompt), `output` (`results` parsed, `raw` text; null on error), `padded`, `ms`, `attempts` (null: SDK retries are internal), `status`, `status_code`, `cost` (null), `usage` (`input_tokens`, `output_tokens`, or null) |
+| `run` | any | categorize call | `rows`, `uncategorized`, `stats`, `ms`, `status` (`ok`, `no_api_key` or exception class) |
+
+`prompt_hash` is the first 12 hex of the sha256 of the prompt template with the category list, so it changes only
+when the template or the categories change.
+
+Jev `decision` values: `accepted` (line categorized), `other` (group step chose "other"), `group_low`
+(group confidence under the threshold), `category_low` (sub-category confidence under it), `error`, `auth`
+(401/402/403, remaining lines skipped). `group` and `category` records only use the values that can occur at
+their step.
+
+### Reason fields on the stdout line
+
+`event=llm_categorize provider=<p> model=<m> rows=<n> uncategorized=<n> <agent fields> ms=<x> run=<id>`.
+The agent fields are counts and scores only, never text:
+
+- Jev: `accepted`, `group_other`, `group_low`, `category_low`, `errors`, `auth` (they sum to `rows`), then
+  `group_score_min/p50/max` over every line that got a group answer and `cat_score_min/p50/max` over every
+  sub-category answer.
+- OpenAI / Anthropic: `batches`, `failed_batches`, `padded` (results the model omitted, filled `Uncategorized`).
