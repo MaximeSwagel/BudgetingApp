@@ -11,13 +11,16 @@ config file — backend settings are defined and validated in `backend/app/confi
 | Variable | Required | Default | Description |
 |----------|----------|---------|--------------|
 | `DATABASE_URL` | Optional | `sqlite+aiosqlite:///./budgetingapp.db` | SQLAlchemy async database URL. In Docker Compose this is overridden to `postgresql+asyncpg://budget:budget_dev@db:5432/budgetingapp` to point at the `db` Postgres service. |
-| `OPENAI_API_KEY` | Optional (required for AI categorization) | `""` (empty) | OpenAI API key used by `backend/app/services/categorizer.py` to categorize uploaded transactions via the `gpt-4o-mini` model. If unset, the app logs a warning and marks all imported transactions as `Uncategorized` instead of failing. |
+| `OPENAI_API_KEY` | Optional (needed when the active provider is OpenAI) | `""` (empty) | OpenAI API key used by the OpenAI agent (`backend/app/services/agents/llm.py`) to categorize transactions. If the active provider's key is unset, the app logs a warning and marks all imported transactions as `Uncategorized` instead of failing. |
+| `ANTHROPIC_API_KEY` | Optional (needed when the active provider is Anthropic) | `""` (empty) | Anthropic API key used by the Anthropic agent (`backend/app/services/agents/llm.py`). |
+| `OPENROUTER_API_KEY` | Optional (needed when the active provider is OpenRouter) | `""` (empty) | OpenRouter API key used by the Jev agent (`backend/app/services/agents/jev.py`). Env-only: it is never stored in the database or returned by the API. |
+| `JEV_CONFIDENCE_THRESHOLD` | Optional | `0.6` | Minimum Jev confidence (per step: group, then sub-category) for a line to receive a category. Lines below it stay `Uncategorized`. |
 | `BASE_CURRENCY` | Optional | `ILS` | Target currency defined in `Settings.base_currency` (`backend/app/config.py`) for currency conversion. <!-- VERIFY: backend/app/routers/upload.py currently hardcodes `base_currency = "ILS"` locally and does not read this setting, so changing `BASE_CURRENCY` has no effect on the upload flow as of this writing --> |
 | `VITE_API_URL` | Optional | `http://localhost:8000` | Backend URL used by the Vite dev server proxy (`frontend/vite.config.ts`) to forward `/api` requests. In `docker-compose.yml` this is set to `http://backend:8000` so the frontend container can reach the backend container by service name. |
 
 A `.env` file exists at the project root (referenced by `Settings.model_config["env_file"] = ".env"` in
 `backend/app/config.py`) with a companion `.env.example` template. Both are excluded from version control
-via `.gitignore`. <!-- VERIFY: exact variable names and example values inside .env.example — file contents were not accessible during doc generation --> Copy `.env.example` to `.env` and fill in real values (at minimum `OPENAI_API_KEY`) before running the app.
+via `.gitignore`. <!-- VERIFY: exact variable names and example values inside .env.example — file contents were not accessible during doc generation --> Copy `.env.example` to `.env` and fill in real values (the key of the provider you use, e.g. `OPENAI_API_KEY`) before running the app.
 
 ## Config file format
 
@@ -29,6 +32,9 @@ is defined in a single Pydantic settings class:
 class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./budgetingapp.db"
     openai_api_key: str = ""
+    anthropic_api_key: str = ""
+    openrouter_api_key: str = ""
+    jev_confidence_threshold: float = 0.6
     base_currency: str = "ILS"
 
     model_config = {"env_file": ".env"}
@@ -45,8 +51,9 @@ consumed directly in `frontend/vite.config.ts` via `process.env.VITE_API_URL`.
 
 - None of the backend settings are strictly required at startup — every field in `Settings` has a default,
   so the app will boot without a `.env` file present.
-- `OPENAI_API_KEY` is functionally required for AI categorization to work as intended. Without it,
-  `categorize_transactions()` in `backend/app/services/categorizer.py` short-circuits and labels every
+- The API key of the active AI provider (`ai_provider`: `openai`, `anthropic` or `openrouter`, chosen on the
+  Settings page) is functionally required for AI categorization. Without it,
+  `categorize_transactions()` in `backend/app/services/classifier.py` short-circuits and labels every
   transaction `Uncategorized` rather than raising an error.
 - `DATABASE_URL` defaults to a local SQLite file (`budgetingapp.db`), which is sufficient for the bundled
   `sqlite+aiosqlite` driver but is overridden to Postgres whenever running via Docker Compose.
@@ -60,6 +67,9 @@ consumed directly in `frontend/vite.config.ts` via `process.env.VITE_API_URL`.
 |----------|---------|--------|
 | `database_url` | `sqlite+aiosqlite:///./budgetingapp.db` | `backend/app/config.py` |
 | `openai_api_key` | `""` | `backend/app/config.py` |
+| `anthropic_api_key` | `""` | `backend/app/config.py` |
+| `openrouter_api_key` | `""` | `backend/app/config.py` |
+| `jev_confidence_threshold` | `0.6` | `backend/app/config.py` |
 | `base_currency` | `ILS` | `backend/app/config.py` |
 | `VITE_API_URL` | `http://localhost:8000` | `frontend/vite.config.ts` |
 
@@ -75,8 +85,8 @@ Two runtime environments exist today: local host development and Docker Compose.
 
 **Docker Compose (`docker-compose.yml`):**
 - The `backend` service explicitly sets `DATABASE_URL` to the containerized Postgres connection string
-  (`postgresql+asyncpg://budget:budget_dev@db:5432/budgetingapp`) and passes through `OPENAI_API_KEY` from
-  the host shell environment (`${OPENAI_API_KEY}`).
+  (`postgresql+asyncpg://budget:budget_dev@db:5432/budgetingapp`) and passes through `OPENAI_API_KEY`,
+  `ANTHROPIC_API_KEY` and `OPENROUTER_API_KEY` from the host shell environment (`${OPENROUTER_API_KEY}` etc.).
 - The `db` service (image `postgres:16-alpine`) is configured with `POSTGRES_USER=budget`,
   `POSTGRES_PASSWORD=budget_dev`, `POSTGRES_DB=budgetingapp` directly in the compose file. <!-- VERIFY: these are development-only credentials defined inline in docker-compose.yml; confirm no separate production secrets management is expected before deploying this configuration anywhere beyond local development -->
 - The `frontend` service sets `VITE_API_URL=http://backend:8000` so the Vite proxy can resolve the

@@ -59,3 +59,10 @@ variable "anthropic_api_key" {
   default     = ""
   sensitive   = true
 }
+
+variable "openrouter_api_key" {
+  description = "OpenRouter API key for Jev transaction categorization (optional; blank -> Jev just returns Uncategorized)"
+  type        = string
+  default     = ""
+  sensitive   = true
+}

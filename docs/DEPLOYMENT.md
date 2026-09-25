@@ -54,6 +54,9 @@ Compose you would need to supply:
 
 - `OPENAI_API_KEY` — required for AI categorization to function (without it, all transactions are
   labeled `Uncategorized` rather than the app failing to start).
+- `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` — needed only when the matching provider is selected on the
+  Settings page. On the Terraform stack these come from the `anthropic_api_key` and `openrouter_api_key`
+  variables, stored as SSM SecureString parameters and written to the host `.env` files.
 - `DATABASE_URL` — must point at a reachable PostgreSQL instance (the SQLite default,
   `sqlite+aiosqlite:///./budgetingapp.db`, is not durable across container restarts and is not
   suitable for a deployed environment).
@@ -62,6 +65,15 @@ Compose you would need to supply:
   server to reach the API correctly.
 
 <!-- VERIFY: Where production secrets (OPENAI_API_KEY, database credentials) would be stored and injected — no secret manager, platform environment configuration, or `.env.production` file exists in the repository to verify this against. -->
+
+### Adding the OpenRouter (Jev) key
+
+Setting the `openrouter_api_key` Terraform variable changes the rendered user-data, and `ec2.tf` sets
+`user_data_replace_on_change = true`, so applying it **replaces the EC2 instance**. To avoid that, add
+`OPENROUTER_API_KEY=...` to `/opt/budgetingapp/.env` and `/opt/budgetingapp-dev/.env` on the host, add
+`OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}` to the backend environment in both `docker-compose.yml` files,
+then run `docker compose up -d` in each directory. Note that per-line Jev classification of a very large
+upload can take longer than batched LLM calls.
 
 ## Rollback Procedure
 

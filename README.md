@@ -131,7 +131,7 @@ BudgetingApp/
 │   │   ├── models/          # Transaction, Category, CategoryGroup, CategoryGroupTarget, ImportBatch
 │   │   ├── parsers/         # Bank format detection + CSV parsers (Revolut FR/EN, Crédit Agricole)
 │   │   ├── routers/         # upload, transactions, categories, budget endpoints
-│   │   └── services/        # categorizer.py (OpenAI), currency.py (conversion)
+│   │   └── services/        # classifier.py + agents/ (OpenAI, Anthropic, Jev), currency.py (conversion)
 │   ├── alembic/              # Database migrations
 │   └── Dockerfile
 ├── frontend/

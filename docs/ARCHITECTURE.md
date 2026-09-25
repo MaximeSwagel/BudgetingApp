@@ -48,7 +48,7 @@ development: `db` (Postgres), `backend` (Uvicorn + FastAPI, hot-reload), and `fr
 │           │                                                    │
 │           ▼                                                    │
 │  Parsers (backend/app/parsers/)      Services (backend/app/services/) │
-│   - detector.py (bank format sniff)   - categorizer.py (OpenAI)        │
+│   - detector.py (bank format sniff)   - classifier.py + agents/        │
 │   - revolut.py  (FR/EN CSV parsing)   - currency.py (Frankfurter API)  │
 │   - ca.py       (Crédit Agricole)                                     │
 │           │                                   │                        │
@@ -65,7 +65,7 @@ development: `db` (Postgres), `backend` (Uvicorn + FastAPI, hot-reload), and `fr
                   └──────────────────┘
 
 External services called by the backend:
-  - OpenAI API (gpt-4o-mini)      → backend/app/services/categorizer.py
+  - OpenAI / Anthropic / OpenRouter (Jev) → backend/app/services/agents/
   - Frankfurter API (frankfurter.dev) → backend/app/services/currency.py
 ```
 
@@ -84,11 +84,11 @@ A typical CSV import request flows through the system as follows:
    `backend/app/parsers/`) decodes the file using `charset-normalizer` (handling encoding differences between
    banks) and returns a list of transaction dicts (`date`, `description`, `original_amount`,
    `original_currency`, `bank`, `is_expense`).
-4. **Categorization** — The parsed transactions are batched (30 at a time) and sent to
-   `categorize_transactions()` (`backend/app/services/categorizer.py`), which prompts OpenAI's `gpt-4o-mini`
-   model to assign each transaction a `general_category` (category group) and `precise_category` (category)
-   from the fixed `CATEGORY_HIERARCHY`. If no `OPENAI_API_KEY` is configured, or the OpenAI call fails, all
-   transactions fall back to `"Uncategorized"`.
+4. **Categorization** — The parsed transactions are passed to `categorize_transactions()`
+   (`backend/app/services/classifier.py`), which hands them to the agent selected by the persisted
+   `ai_provider` and gets back a `general_category` (category group) and `precise_category` (category) per
+   transaction from the fixed `CATEGORY_HIERARCHY`. If the active provider's key is not configured, or its
+   calls fail, the affected transactions fall back to `"Uncategorized"`. See "Categorization agents" below.
 5. **Currency conversion** — For each transaction not already in the base currency (`"ILS"`, hardcoded in
    `upload.py`), `convert_amount()` (`backend/app/services/currency.py`) calls the Frankfurter API
    (`https://api.frankfurter.dev/v1/...`) to fetch a historical exchange rate for the transaction date. Since
@@ -114,6 +114,27 @@ A typical CSV import request flows through the system as follows:
    (`group_totals_for_month` called once per window month) -- which the frontend can apply with a single
    click via the same `POST /api/budget/group-targets` call.
 
+## Categorization agents
+
+`classifier.py` knows nothing about any specific model. It calls `get_active_agent()`, which looks up
+`settings.ai_provider` in `AGENT_REGISTRY` (`agents/registry.py`) on every call, so a provider change on the
+Settings page applies without a restart. An unknown value falls back to OpenAI.
+
+- **Contract:** `CategorizationAgent.classify(transactions) -> list[dict]` returns one
+  `{general_category, precise_category, [confidence]}` per input, in order and same length. The classifier pads,
+  truncates and replaces malformed items, and turns an agent exception into all-`Uncategorized`.
+- **LLM agents** (`OpenAiAgent`, `AnthropicAgent` in `agents/llm.py`): one batched prompt per 30 transactions.
+- **Jev agent** (`agents/jev.py`): classifies each line on its own with OpenRouter's Jev decision model. Two
+  sequential Decisions calls per line, first the budget group (plus an "other" option), then a sub-category
+  offered only from that group; they cannot be one request because questions in a request cannot see each
+  other's answers. A step whose confidence is below `JEV_CONFIDENCE_THRESHOLD` (default 0.6) leaves the line
+  `Uncategorized`. Lines run 8 at a time with a 20s timeout, retry on 429/5xx with capped backoff, and a failing
+  line never fails the request. An auth error (401/402/403) skips the remaining lines.
+- **Seam, not built:** `JevAgent._unresolved()` is where an LLM fallback or a composite agent would plug in.
+  Registry factories are zero-argument callables, so a composite's factory can call `build_agent()`.
+- All Decisions wire-format knowledge (URL, model alias, request/response shape) is isolated in
+  `services/openrouter_client.py`, because the endpoint is alpha.
+
 ## Key Abstractions
 
 | Abstraction | Location | Purpose |
@@ -124,10 +145,11 @@ A typical CSV import request flows through the system as follows:
 | `CategoryGroupTarget` model | `backend/app/models/transaction.py` | A single current target amount per primary category (`CategoryGroup`), applying to every month shown, past and future, joined against actual spend in the budget summary endpoint. `amount` is nullable, meaning "cleared". `effective_month` records which month a row was written against and is retained as groundwork for possible future versioning, but is not consulted on read -- only the most recently written row per group is used. |
 | Bank parser functions | `backend/app/parsers/revolut.py`, `backend/app/parsers/ca.py` | Each bank/format has its own pure function (`content: bytes -> list[dict]`) that normalizes rows into a common transaction-dict shape, isolating bank-specific CSV quirks (delimiters, encodings, multi-line wrapped labels for Crédit Agricole). |
 | `detect_bank_format()` | `backend/app/parsers/detector.py` | Single dispatch point that inspects CSV header content to pick the correct parser, raising `ValueError` on unrecognized formats. |
-| `categorize_transactions()` | `backend/app/services/categorizer.py` | Wraps the OpenAI chat completion call, including batching, prompt construction from the fixed category hierarchy, and defensive fallback to `"Uncategorized"` on any parsing/API failure. |
+| `categorize_transactions()` | `backend/app/services/classifier.py` | Agent-agnostic entry point: resolves the active agent, skips it when unconfigured, and guarantees one result per input so persistence never misaligns. |
+| `CategorizationAgent` / `build_agent()` | `backend/app/services/agents/` | Pluggable agent contract and the registry that maps `ai_provider` to an agent. |
 | `convert_amount()` / `get_exchange_rate()` | `backend/app/services/currency.py` | Currency conversion with in-memory rate caching and hardcoded fallback rates, isolating all Frankfurter API interaction. |
 | `get_db()` | `backend/app/database.py` | FastAPI dependency yielding an `AsyncSession` per request, used via `Depends(get_db)` in every router. |
-| `Settings` | `backend/app/config.py` | `pydantic-settings`-based config loader reading `DATABASE_URL`, `OPENAI_API_KEY`, `BASE_CURRENCY` from environment/`.env`. |
+| `Settings` | `backend/app/config.py` | `pydantic-settings`-based config loader reading `DATABASE_URL`, the provider API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`), `BASE_CURRENCY` from environment/`.env`. |
 
 ## Directory Structure Rationale
 

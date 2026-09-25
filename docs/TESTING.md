@@ -68,7 +68,7 @@ introduced, the natural conventions for the chosen tools would be:
   Priority candidates for first tests based on current code complexity: `backend/app/parsers/detector.py`
   and `backend/app/parsers/revolut.py`/`ca.py` (format-detection and CSV-parsing edge cases),
   `backend/app/services/currency.py` (Frankfurter API cross-rate math and fallback-rate behavior), and
-  `backend/app/services/categorizer.py` (batching and fallback-to-`Uncategorized` behavior when
+  `backend/app/services/classifier.py` and `backend/app/services/agents/` (batching and fallback-to-`Uncategorized` behavior when
   `OPENAI_API_KEY` is unset or the API call fails).
 - **Frontend:** Vitest conventionally discovers `*.test.ts(x)` or `*.spec.ts(x)` files, commonly
   co-located next to the source file (e.g., `frontend/src/api/client.test.ts`). The most testable surface

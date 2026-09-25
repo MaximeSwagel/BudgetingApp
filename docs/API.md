@@ -23,6 +23,9 @@ requests from any origin permitted by CORS. `backend/app/main.py` configures COR
 |--------|------|--------------|----------------|
 | GET | `/api/health` | Health check, returns `{"status": "ok"}` | No |
 | POST | `/api/upload` | Upload a bank CSV export for parsing, categorization, and import | No |
+| GET | `/api/settings/ai` | Active AI provider, models and which provider keys are configured | No |
+| PUT | `/api/settings/ai` | Change the AI provider / model | No |
+| GET | `/api/settings/ai/models` | Model catalog with pricing and estimated cost per 1,000 transactions | No |
 | GET | `/api/transactions` | List transactions with filtering and pagination | No |
 | PATCH | `/api/transactions/{transaction_id}/category` | Reassign a transaction's category | No |
 | GET | `/api/categories` | List all category groups with their categories | No |
@@ -74,8 +77,9 @@ Success response:
 }
 ```
 
-Each parsed transaction is categorized via `backend/app/services/categorizer.py` (OpenAI `gpt-4o-mini`,
-batches of 30), then converted to the base currency (`ILS`, hardcoded in `upload.py`) via
+Each parsed transaction is categorized by `backend/app/services/classifier.py`, which hands the batch to the
+agent selected by the persisted `ai_provider` (OpenAI and Anthropic: batched prompts of 30; OpenRouter/Jev: one
+decision per line), then converted to the base currency (`ILS`, hardcoded in `upload.py`) via
 `backend/app/services/currency.py`. Duplicate detection is based on an exact match of date, original
 amount, original currency, bank, and description (see the `uq_transaction_dedup` constraint on the
 `Transaction` model in `backend/app/models/transaction.py`).
@@ -197,6 +201,34 @@ Request body (both fields optional, only supplied fields are updated):
 Response: `{"id": <int>, "name": <string>, "group_id": <int>}`, or `{"error": "Category not found"}` if the
 category does not exist.
 
+### `GET /api/settings/ai`
+
+Returns the active provider and models plus a boolean per provider saying whether its env key is set. Keys
+themselves are never returned.
+
+```json
+{
+  "ai_provider": "openrouter",
+  "openai_model": "gpt-4o-mini",
+  "anthropic_model": "claude-haiku-4-5",
+  "openrouter_model": "~typesafe/jev-latest",
+  "openai_key_configured": true,
+  "anthropic_key_configured": false,
+  "openrouter_key_configured": true
+}
+```
+
+### `PUT /api/settings/ai`
+
+Body: `ai_provider` (`openai`, `anthropic` or `openrouter`) and optionally `openai_model` / `anthropic_model`.
+The Jev model is fixed and not settable. An unknown `ai_provider` returns `400`. The response has the same
+shape as `GET /api/settings/ai`. The change applies to the next categorization without a restart.
+
+### `GET /api/settings/ai/models`
+
+Returns `providers` (a model list per provider, each with `id`, `label`, `input_per_1m`, `output_per_1m` and
+`est_cost_per_1000_txns`) and `token_estimate_assumptions`. The `openrouter` list has a single entry, Jev.
+
 ### `GET /api/budget/summary`
 
 Query parameters:
@@ -301,4 +333,4 @@ There is no centralized error-handling middleware or custom exception handler in
 No rate limiting library or middleware (`express-rate-limit`-equivalent, `slowapi`, etc.) is present in
 the backend. Requests are not rate-limited by the application itself.
 
-<!-- VERIFY: the OpenAI API calls made by backend/app/services/categorizer.py are subject to OpenAI's own account-level rate limits; consult the OpenAI dashboard for the current limits on the configured API key -->
+<!-- VERIFY: the provider calls made by the categorization agents (`backend/app/services/agents/`) are subject to each provider's own account-level rate limits; consult the provider dashboard for the current limits on the configured API key. The Jev agent retries 429/5xx with capped backoff and leaves a line `Uncategorized` if retries run out. -->

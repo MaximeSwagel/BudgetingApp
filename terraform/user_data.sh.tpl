@@ -24,12 +24,18 @@ ANTHROPIC_API_KEY=$(aws ssm get-parameter --name "${anthropic_ssm_param}" --with
 if [ "$ANTHROPIC_API_KEY" = "unset" ]; then
   ANTHROPIC_API_KEY=""
 fi
+OPENROUTER_API_KEY=$(aws ssm get-parameter --name "${openrouter_ssm_param}" --with-decryption \
+  --region "${aws_region}" --query "Parameter.Value" --output text)
+if [ "$OPENROUTER_API_KEY" = "unset" ]; then
+  OPENROUTER_API_KEY=""
+fi
 
 cat > /opt/budgetingapp/.env <<EOF
 IMAGE_TAG=latest
 DATABASE_URL=postgresql+asyncpg://${db_username}:$${DB_PASSWORD}@${db_endpoint}:${db_port}/${db_name}
 OPENAI_API_KEY=$${OPENAI_API_KEY}
 ANTHROPIC_API_KEY=$${ANTHROPIC_API_KEY}
+OPENROUTER_API_KEY=$${OPENROUTER_API_KEY}
 BASE_CURRENCY=${base_currency}
 EOF
 chmod 600 /opt/budgetingapp/.env
@@ -43,6 +49,7 @@ services:
       DATABASE_URL: $${DATABASE_URL}
       OPENAI_API_KEY: $${OPENAI_API_KEY}
       ANTHROPIC_API_KEY: $${ANTHROPIC_API_KEY}
+      OPENROUTER_API_KEY: $${OPENROUTER_API_KEY}
       BASE_CURRENCY: $${BASE_CURRENCY}
     networks: [app]
 
@@ -90,6 +97,7 @@ IMAGE_TAG=latest
 DATABASE_URL=postgresql+asyncpg://${db_username}:$${DB_PASSWORD}@${db_endpoint}:${db_port}/${db_name}_dev
 OPENAI_API_KEY=$${OPENAI_API_KEY}
 ANTHROPIC_API_KEY=$${ANTHROPIC_API_KEY}
+OPENROUTER_API_KEY=$${OPENROUTER_API_KEY}
 BASE_CURRENCY=${base_currency}
 ALLOW_DATA_RESET=true
 EOF
@@ -107,6 +115,7 @@ services:
       DATABASE_URL: $${DATABASE_URL}
       OPENAI_API_KEY: $${OPENAI_API_KEY}
       ANTHROPIC_API_KEY: $${ANTHROPIC_API_KEY}
+      OPENROUTER_API_KEY: $${OPENROUTER_API_KEY}
       BASE_CURRENCY: $${BASE_CURRENCY}
       ALLOW_DATA_RESET: $${ALLOW_DATA_RESET:-false}
     networks: [app]

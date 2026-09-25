@@ -18,7 +18,7 @@ Pick one of the two paths below and make sure you have the matching tools instal
 
 **Both paths require:**
 - An OpenAI API key. Without one, uploaded transactions are still imported but every transaction is
-  labeled `Uncategorized` instead of being categorized by AI (see `backend/app/services/categorizer.py`).
+  labeled `Uncategorized` instead of being categorized by AI (see `backend/app/services/classifier.py`).
 
 ## Installation Steps
 

@@ -58,3 +58,9 @@ resource "aws_ssm_parameter" "anthropic_api_key" {
   type  = "SecureString"
   value = var.anthropic_api_key == "" ? "unset" : var.anthropic_api_key
 }
+
+resource "aws_ssm_parameter" "openrouter_api_key" {
+  name  = "/${var.project_name}/openrouter_api_key"
+  type  = "SecureString"
+  value = var.openrouter_api_key == "" ? "unset" : var.openrouter_api_key
+}
