@@ -204,7 +204,7 @@ class StatsAgent(CategorizationAgent):
     def is_configured(self):
         return True
 
-    async def classify(self, transactions):
+    async def classify(self, transactions, categories):
         return [dict(GOOD) for _ in transactions]
 
 
@@ -330,7 +330,7 @@ async def test_llm_agent_last_run_stats(monkeypatch, openai_settings):
 
     monkeypatch.setattr(llm_mod, "AsyncOpenAI", _fake_openai(create))
     agent = OpenAiAgent()
-    await agent.classify(_txns(3))
+    await agent.classify(_txns(3), {"G": ["C"]})
     assert agent.last_run_stats == {"batches": 1, "failed_batches": 0, "padded": 2}
 
 
@@ -341,3 +341,11 @@ async def test_default_off_leaves_no_files(monkeypatch, tmp_path, openai_setting
     monkeypatch.setattr(llm_mod, "AsyncOpenAI", _fake_openai(create))
     await classifier.categorize_transactions(_txns())
     assert list(tmp_path.iterdir()) == []
+
+
+def test_taxonomy_hash_shape_and_order_sensitivity():
+    a = {"A": ["x"], "B": ["y"]}
+    h = agent_trace.taxonomy_hash(a)
+    assert re.fullmatch(r"[0-9a-f]{12}", h)
+    assert agent_trace.taxonomy_hash({"A": ["x"], "B": ["y"]}) == h
+    assert agent_trace.taxonomy_hash({"B": ["y"], "A": ["x"]}) != h

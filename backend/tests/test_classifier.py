@@ -26,8 +26,9 @@ class StubAgent(CategorizationAgent):
     def is_configured(self):
         return self.configured
 
-    async def classify(self, transactions):
+    async def classify(self, transactions, categories):
         self.called = True
+        self.categories = categories
         if self.error:
             raise self.error
         return self.result
@@ -94,3 +95,42 @@ async def test_contract_guard_pads_truncates_and_replaces_non_dicts(monkeypatch)
 async def test_raising_agent_gives_uncategorized(monkeypatch):
     use(monkeypatch, StubAgent(error=RuntimeError("x")))
     assert await classifier.categorize_transactions(TXNS) == [UNCATEGORIZED, UNCATEGORIZED]
+
+
+@pytest.mark.asyncio
+async def test_agent_receives_loaded_taxonomy_each_call(monkeypatch):
+    loads = []
+
+    async def load(session=None):
+        loads.append(1)
+        return {"G": ["C"]}
+
+    monkeypatch.setattr(classifier, "load_category_hierarchy", load)
+    agent = StubAgent(result=[GOOD, GOOD])
+    use(monkeypatch, agent)
+    await classifier.categorize_transactions(TXNS)
+    await classifier.categorize_transactions(TXNS)
+    assert agent.categories == {"G": ["C"]}
+    assert len(loads) == 2
+
+
+@pytest.mark.asyncio
+async def test_unconfigured_agent_never_loads(monkeypatch):
+    async def load(session=None):
+        raise AssertionError("no load expected")
+
+    monkeypatch.setattr(classifier, "load_category_hierarchy", load)
+    use(monkeypatch, StubAgent(configured=False))
+    assert await classifier.categorize_transactions(TXNS) == [UNCATEGORIZED, UNCATEGORIZED]
+
+
+@pytest.mark.asyncio
+async def test_loader_failure_degrades_to_uncategorized(monkeypatch):
+    async def load(session=None):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(classifier, "load_category_hierarchy", load)
+    agent = StubAgent(result=[GOOD, GOOD])
+    use(monkeypatch, agent)
+    assert await classifier.categorize_transactions(TXNS) == [UNCATEGORIZED, UNCATEGORIZED]
+    assert agent.called is False

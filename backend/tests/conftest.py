@@ -4,6 +4,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import agent_trace
+from app.services import classifier, taxonomy
 from app.config import settings
 from app.database import get_db
 from app.main import SEED_CATEGORIES, app
@@ -15,6 +16,14 @@ def _agent_trace_off(monkeypatch):
     monkeypatch.setattr(settings, "agent_log_dir", "")
     yield
     agent_trace.reset()
+
+
+@pytest.fixture(autouse=True)
+def _seed_taxonomy(monkeypatch):
+    async def load(session=None):
+        return {g: list(c) for g, c in SEED_CATEGORIES.items()}
+
+    monkeypatch.setattr(classifier, "load_category_hierarchy", load)
 
 
 @pytest_asyncio.fixture
@@ -52,3 +61,10 @@ async def client(db_session):
         yield ac
 
     app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def db_taxonomy(db_session, monkeypatch):
+    monkeypatch.setattr(classifier, "load_category_hierarchy", taxonomy.load_category_hierarchy)
+    monkeypatch.setattr(taxonomy, "async_session", db_session)
+    yield db_session

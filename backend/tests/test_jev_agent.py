@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -11,10 +12,13 @@ from app.config import settings
 from app.services import classifier
 from app.services import openrouter_client as oc
 from app.services.agents import jev as jev_mod
-from app.services.agents.base import CATEGORY_HIERARCHY, UNCATEGORIZED
+from app.main import SEED_CATEGORIES
+from app.services.agents.base import UNCATEGORIZED
 from app.services.agents.jev import JevAgent
 
-GROUPS = list(CATEGORY_HIERARCHY)
+PRE_CHANGE_SEED_OPTIONS_SHA256 = "25da172dd89b5e0c1395f924e6f611e518c32d3c42e430141341f99cc34fcbba"
+TAXONOMY = {g: list(c) for g, c in SEED_CATEGORIES.items()}
+GROUPS = list(TAXONOMY)
 GROCERY_GROUP = "Household Expenses"
 
 
@@ -64,7 +68,7 @@ async def test_two_step_classification():
     log = []
     agent = make_agent(happy_handler(log=log))
 
-    out = await agent.classify([txn("Tesco")])
+    out = await agent.classify([txn("Tesco")], TAXONOMY)
 
     assert out[0]["general_category"] == GROCERY_GROUP
     assert out[0]["precise_category"] == "Groceries"
@@ -85,11 +89,11 @@ async def test_group_question_offers_groups_plus_other_and_category_only_chosen_
         key = next(iter(q["criteria"]))
         return httpx.Response(200, json=answer(qid, key, 0.9, q["criteria"]))
 
-    await make_agent(handler).classify([txn("Tesco")])
+    await make_agent(handler).classify([txn("Tesco")], TAXONOMY)
 
     assert len(captured["group"]["criteria"]) == len(GROUPS) + 1
     assert "other" in captured["group"]["criteria"]
-    assert len(captured["category"]["criteria"]) == len(CATEGORY_HIERARCHY[GROCERY_GROUP])
+    assert len(captured["category"]["criteria"]) == len(TAXONOMY[GROCERY_GROUP])
 
 
 @pytest.mark.asyncio
@@ -102,7 +106,7 @@ async def test_state_carries_description_amount_currency_bank():
         (qid, q), = body["questions"].items()
         return httpx.Response(200, json=answer(qid, "other", 0.99, q["criteria"]))
 
-    await make_agent(handler).classify([txn("Tesco", "12.50")])
+    await make_agent(handler).classify([txn("Tesco", "12.50")], TAXONOMY)
 
     assert seen == {"description": "Tesco", "amount": "12.50", "currency": "ILS", "bank": "Revolut"}
 
@@ -110,7 +114,7 @@ async def test_state_carries_description_amount_currency_bank():
 @pytest.mark.asyncio
 async def test_low_group_confidence_is_uncategorized_and_skips_step_two():
     log = []
-    out = await make_agent(happy_handler(group_conf=0.4, log=log)).classify([txn("Tesco")])
+    out = await make_agent(happy_handler(group_conf=0.4, log=log)).classify([txn("Tesco")], TAXONOMY)
 
     assert out[0] == UNCATEGORIZED
     assert [q for q, _ in log] == ["group"]
@@ -118,7 +122,7 @@ async def test_low_group_confidence_is_uncategorized_and_skips_step_two():
 
 @pytest.mark.asyncio
 async def test_low_category_confidence_is_uncategorized():
-    out = await make_agent(happy_handler(cat_conf=0.5)).classify([txn("Tesco")])
+    out = await make_agent(happy_handler(cat_conf=0.5)).classify([txn("Tesco")], TAXONOMY)
 
     assert out[0] == UNCATEGORIZED
 
@@ -133,7 +137,7 @@ async def test_other_group_is_uncategorized_without_step_two():
         log.append(qid)
         return httpx.Response(200, json=answer(qid, "other", 0.99, q["criteria"]))
 
-    out = await make_agent(handler).classify([txn("Salary")])
+    out = await make_agent(handler).classify([txn("Salary")], TAXONOMY)
 
     assert out[0] == UNCATEGORIZED
     assert log == ["group"]
@@ -150,7 +154,7 @@ async def test_score_falls_back_to_probability_when_confidence_absent():
             200, json={"answers": {qid: {"type": "choice", "choice": choice, "probabilities": probs}}}
         )
 
-    out = await make_agent(handler).classify([txn("Tesco")])
+    out = await make_agent(handler).classify([txn("Tesco")], TAXONOMY)
 
     assert out[0]["general_category"] == GROCERY_GROUP
 
@@ -163,7 +167,7 @@ async def test_single_line_failure_is_isolated():
             return httpx.Response(400, text="bad")
         return await happy_handler()(request)
 
-    out = await make_agent(handler).classify([txn("Tesco"), txn("Boom"), txn("Tesco")])
+    out = await make_agent(handler).classify([txn("Tesco"), txn("Boom"), txn("Tesco")], TAXONOMY)
 
     assert out[0]["general_category"] == GROCERY_GROUP
     assert out[1] == UNCATEGORIZED
@@ -181,7 +185,7 @@ async def test_output_order_matches_input_when_later_lines_finish_first():
             return httpx.Response(200, json=answer(qid, "other", 0.99, q["criteria"]))
         return await happy_handler()(request)
 
-    out = await make_agent(handler).classify([txn("slow"), txn("fast"), txn("fast")])
+    out = await make_agent(handler).classify([txn("slow"), txn("fast"), txn("fast")], TAXONOMY)
 
     assert out[0] == UNCATEGORIZED
     assert out[1]["general_category"] == GROCERY_GROUP
@@ -201,7 +205,7 @@ async def test_concurrency_is_capped(monkeypatch):
         state["now"] -= 1
         return await happy_handler()(request)
 
-    await make_agent(handler).classify([txn(f"t{i}") for i in range(6)])
+    await make_agent(handler).classify([txn(f"t{i}") for i in range(6)], TAXONOMY)
 
     assert state["peak"] == 2
 
@@ -215,7 +219,7 @@ async def test_auth_error_short_circuits_remaining_lines(monkeypatch):
         calls.append(1)
         return httpx.Response(401, text="no")
 
-    out = await make_agent(handler).classify([txn(f"t{i}") for i in range(5)])
+    out = await make_agent(handler).classify([txn(f"t{i}") for i in range(5)], TAXONOMY)
 
     assert out == [UNCATEGORIZED] * 5
     assert len(calls) == 1
@@ -226,7 +230,7 @@ async def test_empty_input_makes_no_requests():
     async def handler(request):
         raise AssertionError("no HTTP expected")
 
-    assert await make_agent(handler).classify([]) == []
+    assert await make_agent(handler).classify([], TAXONOMY) == []
 
 
 def test_is_configured_follows_key():
@@ -286,7 +290,7 @@ STATS_KEYS = [
 async def test_mixed_run_results_and_stats():
     agent = make_agent(mixed_handler())
 
-    out = await agent.classify(MIXED)
+    out = await agent.classify(MIXED, TAXONOMY)
 
     assert [r["general_category"] for r in out] == [GROCERY_GROUP] + ["Uncategorized"] * 4
     stats = agent.last_run_stats
@@ -308,7 +312,7 @@ async def test_auth_failure_stats_and_records(monkeypatch, tmp_path):
         return httpx.Response(401, text="nope")
 
     agent = make_agent(handler)
-    await agent.classify([txn(f"t{i}") for i in range(5)])
+    await agent.classify([txn(f"t{i}") for i in range(5)], TAXONOMY)
 
     assert agent.last_run_stats == dict(accepted=0, group_other=0, group_low=0, category_low=0, errors=0, auth=5)
     recs = records(path)
@@ -324,7 +328,7 @@ async def test_trace_records_for_accepted_line(monkeypatch, tmp_path):
     agent = make_agent(mixed_handler(cost=0.00002))
 
     with agent_trace.trace_run() as run_id:
-        await agent.classify([txn("Tesco")])
+        await agent.classify([txn("Tesco")], TAXONOMY)
 
     recs = records(path)
     assert all(r["provider"] == "openrouter" and r["model"] == "~typesafe/jev-latest" for r in recs)
@@ -341,7 +345,7 @@ async def test_trace_records_for_accepted_line(monkeypatch, tmp_path):
     assert group["attempts"] == 1 and group["status"] == "ok" and group["status_code"] is None
     assert group["decision"] == "accepted" and group["threshold"] == 0.6 and group["cost"] == 0.00002
     (cat,) = by_stage(recs, "category")
-    assert cat["input"]["options"] == list(jev_mod.CATEGORY_SLUGS[GROCERY_GROUP])
+    assert cat["input"]["options"] == list(jev_mod.build_options(TAXONOMY).category_slugs[GROCERY_GROUP])
     assert cat["decision"] == "accepted" and cat["queue_ms"] == 0.0
     (line,) = by_stage(recs, "line")
     assert line["group"] == GROCERY_GROUP and line["category"] == "Groceries"
@@ -352,7 +356,7 @@ async def test_trace_records_for_accepted_line(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_cost_is_null_when_absent(monkeypatch, tmp_path):
     path = trace_to(monkeypatch, tmp_path)
-    await make_agent(mixed_handler()).classify([txn("Tesco")])
+    await make_agent(mixed_handler()).classify([txn("Tesco")], TAXONOMY)
     recs = records(path)
     assert all(r["cost"] is None for r in recs)
 
@@ -370,7 +374,7 @@ async def test_retry_is_visible_as_attempts(monkeypatch, tmp_path):
             return httpx.Response(429, headers={"Retry-After": "0"})
         return await inner(request)
 
-    await make_agent(handler).classify([txn("Tesco")])
+    await make_agent(handler).classify([txn("Tesco")], TAXONOMY)
     (group,) = by_stage(records(path), "group")
     assert group["attempts"] == 2
 
@@ -378,7 +382,7 @@ async def test_retry_is_visible_as_attempts(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_error_line_and_decisions(monkeypatch, tmp_path):
     path = trace_to(monkeypatch, tmp_path)
-    await make_agent(mixed_handler()).classify(MIXED)
+    await make_agent(mixed_handler()).classify(MIXED, TAXONOMY)
     recs = records(path)
     (boom,) = by_stage(recs, "group", "Boom")
     assert boom["status"] == "DecisionsError" and boom["status_code"] == 400
@@ -401,7 +405,7 @@ async def test_api_key_never_reaches_trace_file(monkeypatch, tmp_path, status):
     async def handler(request):
         return httpx.Response(status, text=f"echo {KEY}")
 
-    await make_agent(handler, api_key=KEY).classify([txn("Tesco")])
+    await make_agent(handler, api_key=KEY).classify([txn("Tesco")], TAXONOMY)
     assert path.exists()
     assert KEY not in path.read_text(encoding="utf-8")
 
@@ -416,7 +420,7 @@ async def test_queue_ms_reflects_semaphore_wait(monkeypatch, tmp_path):
         await asyncio.sleep(0.02)
         return await inner(request)
 
-    await make_agent(handler).classify([txn("Tesco"), txn("Tesco"), txn("Tesco")])
+    await make_agent(handler).classify([txn("Tesco"), txn("Tesco"), txn("Tesco")], TAXONOMY)
     assert any(r["queue_ms"] > 0 for r in by_stage(records(path), "line"))
 
 
@@ -439,3 +443,98 @@ async def test_summary_line_carries_reasons_and_run(monkeypatch, tmp_path, caplo
     for m in msgs:
         for secret in ("Tesco", "Salary", "10.00", "sk-test"):
             assert secret not in m
+
+
+def first_choice_handler(log):
+    async def handler(request):
+        body = json.loads(request.content)
+        (qid, q), = body["questions"].items()
+        log.append((qid, q["criteria"]))
+        key = next(iter(q["criteria"]))
+        return httpx.Response(200, json=answer(qid, key, 0.9, q["criteria"]))
+
+    return handler
+
+
+def test_seed_options_are_byte_identical_to_pre_change():
+    o = jev_mod.build_options(TAXONOMY)
+    blob = json.dumps([o.group_slugs, o.group_criteria, o.category_slugs])
+    assert hashlib.sha256(blob.encode()).hexdigest() == PRE_CHANGE_SEED_OPTIONS_SHA256
+
+
+def test_added_group_and_category_appear_in_criteria():
+    tax = {**TAXONOMY, "Pets": ["Pet Food", "Vet"]}
+    tax["Health Care"] = [*tax["Health Care"], "Optician"]
+    o = jev_mod.build_options(tax)
+    assert o.group_criteria["pets"] == "Pets: Pet Food, Vet"
+    assert "Optician" in o.group_criteria["health_care"]
+    assert list(o.category_slugs["Pets"].values()) == ["Pet Food", "Vet"]
+
+
+@pytest.mark.asyncio
+async def test_renamed_category_is_offered_and_returned_under_new_name():
+    tax = {"Household Expenses": ["Supermarket", "Clothing"]}
+    log = []
+
+    out = await make_agent(first_choice_handler(log)).classify([txn("Tesco")], tax)
+
+    assert out[0]["precise_category"] == "Supermarket"
+    assert "Groceries" not in json.dumps(log)
+
+
+def test_empty_group_is_not_a_group_option():
+    o = jev_mod.build_options({"Hollow": [], "Pets": ["Vet", "Food"]})
+    assert list(o.group_slugs.values()) == ["Pets"]
+    assert "Hollow" not in json.dumps(o.group_criteria)
+
+
+@pytest.mark.asyncio
+async def test_single_subcategory_group_is_one_request():
+    log = []
+    out = await make_agent(first_choice_handler(log)).classify([txn("x")], {"Solo": ["Only"]})
+    assert [q for q, _ in log] == ["group"]
+    assert out[0]["general_category"] == "Solo" and out[0]["precise_category"] == "Only"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tax", [{}, {"Hollow": []}])
+async def test_empty_taxonomy_makes_no_requests(caplog, tax):
+    caplog.set_level(logging.INFO)
+
+    async def handler(request):
+        raise AssertionError("no HTTP expected")
+
+    agent = make_agent(handler)
+    out = await agent.classify([txn("a"), txn("b")], tax)
+
+    assert out == [UNCATEGORIZED, UNCATEGORIZED] and agent.last_run_stats == {}
+    assert any(
+        "event=agent_taxonomy provider=openrouter ok=false reason=empty" in r.getMessage()
+        for r in caplog.records if r.levelno == logging.WARNING
+    )
+
+
+def test_group_cap_truncates_and_warns_without_names(caplog):
+    caplog.set_level(logging.INFO)
+    tax = {f"Secret{i}": ["a", "b"] for i in range(300)}
+    o = jev_mod.build_options(tax)
+    assert len(o.group_slugs) == 254 and len(o.group_criteria) == 255
+    msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("reason=group_cap count=300 kept=254" in m for m in msgs)
+    assert not any("Secret" in m for m in msgs)
+
+
+def test_category_cap_truncates_and_warns_without_names(caplog):
+    caplog.set_level(logging.INFO)
+    o = jev_mod.build_options({"Big": [f"Secret{i}" for i in range(300)]})
+    assert len(o.category_slugs["Big"]) == 255
+    msgs = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("reason=category_cap groups=1 kept=255" in m for m in msgs)
+    assert not any("Secret" in m for m in msgs)
+
+
+def test_other_stays_reserved_and_slugs_unique():
+    o = jev_mod.build_options({"Other": ["x", "y"], "other!": ["x", "X"]})
+    assert "other_2" in o.group_slugs and "other" not in o.group_slugs
+    assert o.group_criteria["other"] == jev_mod.OTHER_DESCRIPTION
+    assert len(set(o.category_slugs["other!"])) == 2
