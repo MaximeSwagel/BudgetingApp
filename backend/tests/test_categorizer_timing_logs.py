@@ -85,7 +85,7 @@ async def test_openai_success_pads_and_logs(monkeypatch, caplog):
     )
     assert any(
         re.match(
-            r"^event=llm_categorize provider=openai model=gpt-test rows=2 uncategorized=1 ms=\d+\.\d$", m
+            r"^event=llm_categorize provider=openai model=gpt-test rows=2 uncategorized=1 batches=1 failed_batches=0 padded=1 ms=\d+\.\d run=[0-9a-f]{12}$", m
         )
         for m in msgs
     )
@@ -160,7 +160,7 @@ async def test_no_api_key_logs_skip(monkeypatch, caplog):
     results = await categorizer.categorize_transactions(_txns())
     assert all(r["general_category"] == "Uncategorized" for r in results)
     assert any(
-        re.match(r"^event=llm_categorize provider=openai model=gpt-test rows=2 ok=false skipped=no_api_key$", m)
+        re.match(r"^event=llm_categorize provider=openai model=gpt-test rows=2 ok=false skipped=no_api_key run=[0-9a-f]{12}$", m)
         for m in _msgs(caplog, logging.WARNING)
     )
     _assert_private(caplog)

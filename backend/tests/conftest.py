@@ -3,9 +3,18 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app import agent_trace
+from app.config import settings
 from app.database import get_db
 from app.main import SEED_CATEGORIES, app
 from app.models import Base, Category, CategoryGroup
+
+
+@pytest.fixture(autouse=True)
+def _agent_trace_off(monkeypatch):
+    monkeypatch.setattr(settings, "agent_log_dir", "")
+    yield
+    agent_trace.reset()
 
 
 @pytest_asyncio.fixture
