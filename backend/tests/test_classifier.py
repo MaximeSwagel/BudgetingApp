@@ -1,4 +1,10 @@
+import json
+import logging
+import re
+
 import pytest
+
+from app import agent_trace
 
 from app.config import settings
 from app.services import classifier
@@ -134,3 +140,55 @@ async def test_loader_failure_degrades_to_uncategorized(monkeypatch):
     use(monkeypatch, agent)
     assert await classifier.categorize_transactions(TXNS) == [UNCATEGORIZED, UNCATEGORIZED]
     assert agent.called is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tax", [{}, {"Empty": []}])
+async def test_no_categories_skips_agent(monkeypatch, caplog, tax):
+    caplog.set_level(logging.INFO)
+
+    async def load(session=None):
+        return tax
+
+    monkeypatch.setattr(classifier, "load_category_hierarchy", load)
+    agent = StubAgent(result=[GOOD, GOOD])
+    use(monkeypatch, agent)
+
+    out = await classifier.categorize_transactions(TXNS)
+
+    assert out == [UNCATEGORIZED, UNCATEGORIZED] and agent.called is False
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    (w,) = warnings
+    assert re.match(
+        r"^event=llm_categorize provider=stub model=stub-model rows=2 ok=false skipped=no_categories run=[0-9a-f]{12}$",
+        w.getMessage(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_records_carry_taxonomy_hash(monkeypatch, tmp_path):
+    monkeypatch.setattr(settings, "agent_log_dir", str(tmp_path))
+    tax = {"G": ["C"]}
+
+    async def load(session=None):
+        return tax
+
+    monkeypatch.setattr(classifier, "load_category_hierarchy", load)
+    use(monkeypatch, StubAgent(result=[GOOD, GOOD]))
+    await classifier.categorize_transactions(TXNS)
+    use(monkeypatch, StubAgent(configured=False))
+    await classifier.categorize_transactions(TXNS)
+
+    async def empty(session=None):
+        return {}
+
+    monkeypatch.setattr(classifier, "load_category_hierarchy", empty)
+    use(monkeypatch, StubAgent(result=[GOOD, GOOD]))
+    await classifier.categorize_transactions(TXNS)
+
+    recs = [json.loads(line) for line in (tmp_path / "stub.log").read_text().splitlines()]
+    ok, no_key, skipped = recs
+    assert ok["status"] == "ok" and ok["taxonomy_hash"] == agent_trace.taxonomy_hash(tax)
+    assert no_key["status"] == "no_api_key" and no_key["taxonomy_hash"] is None
+    assert skipped["status"] == "no_categories" and re.fullmatch(r"[0-9a-f]{12}", skipped["taxonomy_hash"])
+    assert skipped["uncategorized"] == 2
