@@ -10,6 +10,8 @@ curl -sSL "https://github.com/docker/compose/releases/download/v2.29.7/docker-co
 chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 
 mkdir -p /opt/budgetingapp
+# Agent traces hold financial data and stay off in prod until AGENT_LOG_DIR is added to its .env.
+install -d -m 700 /opt/budgetingapp/agent-logs
 cd /opt/budgetingapp
 
 DB_PASSWORD=$(aws ssm get-parameter --name "${db_ssm_param}" --with-decryption \
@@ -46,6 +48,8 @@ services:
     image: ${ecr_backend}:$${IMAGE_TAG}
     restart: unless-stopped
     env_file: .env
+    volumes:
+      - ./agent-logs:/app/agent-logs
     networks: [app]
 
   frontend:
@@ -85,6 +89,7 @@ chmod +x /opt/budgetingapp/deploy.sh
 
 # --- dev environment: separate compose project, separate DB, port 8080 ---
 mkdir -p /opt/budgetingapp-dev
+install -d -m 700 /opt/budgetingapp-dev/agent-logs
 cd /opt/budgetingapp-dev
 
 cat > /opt/budgetingapp-dev/.env <<EOF
@@ -95,6 +100,7 @@ ANTHROPIC_API_KEY=$${ANTHROPIC_API_KEY}
 OPENROUTER_API_KEY=$${OPENROUTER_API_KEY}
 BASE_CURRENCY=${base_currency}
 ALLOW_DATA_RESET=true
+AGENT_LOG_DIR=/app/agent-logs
 EOF
 chmod 600 /opt/budgetingapp-dev/.env
 
@@ -107,6 +113,8 @@ services:
     image: ${ecr_backend}:$${IMAGE_TAG}
     restart: unless-stopped
     env_file: .env
+    volumes:
+      - ./agent-logs:/app/agent-logs
     networks: [app]
 
   frontend:

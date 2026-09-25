@@ -19,6 +19,9 @@ frontend/blob-report/
 # GSD workflow bookkeeping (planning/roadmap state, not app code)
 .planning/
 
+# Agent trace files (financial data)
+agent-logs/
+
 # Terraform
 terraform/.terraform/
 terraform/*.tfstate
