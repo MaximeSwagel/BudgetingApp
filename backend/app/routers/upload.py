@@ -17,7 +17,7 @@ from app.repositories import (
     TransactionRepository,
     UploadLogRepository,
 )
-from app.services.categorizer import categorize_transactions, resolve_category_id
+from app.services.classifier import categorize_transactions, resolve_category_id
 from app.services.corrections import categorize_with_corrections, learned_categories
 from app.services.currency import convert_amount
 from app.services.transfer_scan import resolve_transfer_fee_category_id, scan_and_persist

@@ -6,15 +6,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.repositories import UserSettingsRepository
+from app.services.agents.registry import AGENT_REGISTRY, build_agent
+from app.services.openrouter_client import JEV_MODEL
 from app.services.recurring import RECURRING_THRESHOLD_KEY
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 AI_SETTING_KEYS = ("ai_provider", "openai_model", "anthropic_model")
-VALID_PROVIDERS = ("openai", "anthropic")
+VALID_PROVIDERS = tuple(AGENT_REGISTRY)
 
 # Rough token-usage assumptions for a single transaction categorization call
-# at the categorizer's batch size of 30 — used only to produce an indicative
+# at the LLM agents' batch size of 30 — used only to produce an indicative
 # cost estimate on the Settings page, not a billing-accurate figure.
 EST_INPUT_TOKENS_PER_TXN = 150
 EST_OUTPUT_TOKENS_PER_TXN = 30
@@ -36,18 +38,34 @@ MODEL_CATALOG = {
         },
         {"id": "claude-opus-4-8", "label": "Claude Opus 4.8", "input_per_1m": 5.00, "output_per_1m": 25.00},
     ],
+    "openrouter": [
+        {
+            "id": JEV_MODEL,
+            "label": "Jev (latest)",
+            "input_per_1m": 0.042,
+            "output_per_1m": 0.0,
+            # Two decision calls per line, sized from the docs' 476-token 3-question example.
+            "input_tokens_per_txn": 500,
+            "output_tokens_per_txn": 0,
+        },
+    ],
 }
 
 
-def _est_cost_per_1000_txns(input_per_1m: float, output_per_1m: float) -> float:
-    input_cost = 1000 * (EST_INPUT_TOKENS_PER_TXN / 1_000_000) * input_per_1m
-    output_cost = 1000 * (EST_OUTPUT_TOKENS_PER_TXN / 1_000_000) * output_per_1m
+def _est_cost_per_1000_txns(
+    input_per_1m: float,
+    output_per_1m: float,
+    input_tokens: int = EST_INPUT_TOKENS_PER_TXN,
+    output_tokens: int = EST_OUTPUT_TOKENS_PER_TXN,
+) -> float:
+    input_cost = 1000 * (input_tokens / 1_000_000) * input_per_1m
+    output_cost = 1000 * (output_tokens / 1_000_000) * output_per_1m
     return round(input_cost + output_cost, 4)
 
 
 def apply_ai_settings_to_config(values: dict) -> None:
     """Push persisted/updated AI settings into the running config singleton
-    so the categorizer picks them up immediately, without a restart."""
+    so the classifier picks them up immediately, without a restart."""
     for key in AI_SETTING_KEYS:
         if key in values:
             setattr(settings, key, values[key])
@@ -58,8 +76,8 @@ def _current_ai_settings() -> dict:
         "ai_provider": settings.ai_provider,
         "openai_model": settings.openai_model,
         "anthropic_model": settings.anthropic_model,
-        "openai_key_configured": bool(settings.openai_api_key),
-        "anthropic_key_configured": bool(settings.anthropic_api_key),
+        "openrouter_model": JEV_MODEL,
+        **{f"{p}_key_configured": build_agent(p).is_configured() for p in AGENT_REGISTRY},
     }
 
 
@@ -113,7 +131,12 @@ async def get_ai_models():
         provider: [
             {
                 **model,
-                "est_cost_per_1000_txns": _est_cost_per_1000_txns(model["input_per_1m"], model["output_per_1m"]),
+                "est_cost_per_1000_txns": _est_cost_per_1000_txns(
+                    model["input_per_1m"],
+                    model["output_per_1m"],
+                    model.get("input_tokens_per_txn", EST_INPUT_TOKENS_PER_TXN),
+                    model.get("output_tokens_per_txn", EST_OUTPUT_TOKENS_PER_TXN),
+                ),
             }
             for model in models
         ]

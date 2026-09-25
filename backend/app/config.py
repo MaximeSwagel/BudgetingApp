@@ -5,9 +5,12 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./budgetingapp.db"
     openai_api_key: str = ""
     anthropic_api_key: str = ""
+    openrouter_api_key: str = ""
     ai_provider: str = "openai"
     openai_model: str = "gpt-4o-mini"
     anthropic_model: str = "claude-haiku-4-5"
+    # Jev per-step confidence below this leaves the line Uncategorized.
+    jev_confidence_threshold: float = 0.6
     base_currency: str = "ILS"
     # Default floor (in base currency) above which a recurring merchant is
     # flagged as a "large" recurring expense on the Analysis page. User-

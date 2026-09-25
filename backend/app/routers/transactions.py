@@ -1,7 +1,6 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.database import get_db
 from app.repositories import (
     CategoryCorrectionRepository,
@@ -9,13 +8,13 @@ from app.repositories import (
     CategoryRepository,
     TransactionRepository,
 )
-from app.services.categorizer import categorize_transactions, resolve_category_id
+from app.services.classifier import categorize_transactions, get_active_agent, resolve_category_id
 from app.services.corrections import categorize_with_corrections, learned_categories, match_key
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
 
 # Bound one auto-categorize run so the HTTP request stays well under proxy
-# timeouts (~10 OpenAI calls); the response reports what's left to do.
+# timeouts (~10 batched LLM calls, or ~300 per-line Jev calls at 8 concurrent); the response reports what's left to do.
 CATEGORIZE_BATCH_LIMIT = 300
 
 
@@ -23,11 +22,9 @@ CATEGORIZE_BATCH_LIMIT = 300
 async def auto_categorize(db: AsyncSession = Depends(get_db)):
     """Run the AI categorizer over transactions that still have no category
     (e.g. imported while the active provider's key/quota was missing)."""
-    provider = settings.ai_provider
-    active_key = settings.anthropic_api_key if provider == "anthropic" else settings.openai_api_key
-    if not active_key:
-        provider_label = "Anthropic" if provider == "anthropic" else "OpenAI"
-        return {"error": f"No {provider_label} API key configured — add one, then retry."}
+    agent = get_active_agent()
+    if not agent.is_configured():
+        return {"error": f"No {agent.label} API key configured — add one, then retry."}
 
     repo = TransactionRepository(db)
     txns = await repo.list_uncategorized(limit=CATEGORIZE_BATCH_LIMIT)

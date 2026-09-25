@@ -15,7 +15,7 @@ Design decisions (see the plan for the full rationale):
 
 import re
 
-from app.services.categorizer import UNCATEGORIZED
+from app.services.agents.base import UNCATEGORIZED
 
 # Bounds how broadly a stored merchant key may match by containment: a key
 # shorter than this could show up inside unrelated descriptions and silently
