@@ -2,10 +2,12 @@ import json
 import logging
 import time
 from abc import abstractmethod
+from typing import NamedTuple
 
 from anthropic import AsyncAnthropic
 from openai import AsyncOpenAI
 
+from app import agent_trace
 from app.config import settings
 from app.observability import elapsed_ms, log_event
 from app.services.agents.base import CATEGORY_HIERARCHY, UNCATEGORIZED, CategorizationAgent
@@ -66,42 +68,85 @@ Return a JSON array with objects having "general_category" and "precise_category
 Return ONLY the JSON array, no other text."""
 
 
+PROMPT_HASH = agent_trace.prompt_hash(_build_prompt([]))
+
+
+class BatchReply(NamedTuple):
+    categories: list
+    raw: str
+    usage: dict | None
+
+
+def _usage(response, in_attr: str, out_attr: str) -> dict | None:
+    usage = getattr(response, "usage", None)
+    tokens_in, tokens_out = getattr(usage, in_attr, None), getattr(usage, out_attr, None)
+    if not all(isinstance(t, int) and not isinstance(t, bool) for t in (tokens_in, tokens_out)):
+        return None
+    return {"input_tokens": tokens_in, "output_tokens": tokens_out}
+
+
 class LlmAgent(CategorizationAgent):
     """Chat-LLM agents: one batched prompt per BATCH_SIZE transactions."""
 
     async def classify(self, transactions: list[dict]) -> list[dict]:
         results = []
         total_batches = -(-len(transactions) // BATCH_SIZE)
+        failed_batches = 0
+        total_padded = 0
         for i in range(0, len(transactions), BATCH_SIZE):
             batch = transactions[i:i + BATCH_SIZE]
             batch_no = i // BATCH_SIZE + 1
             batch_start = time.perf_counter()
+            prompt = _build_prompt(batch)
+            trace = {
+                "model": self.model, "stage": "batch", "batch": f"{batch_no}/{total_batches}",
+                "size": len(batch), "prompt_hash": PROMPT_HASH, "input": {"prompt": prompt},
+            }
             try:
-                categories = await self._complete_batch(_build_prompt(batch))
+                reply = await self._complete_batch(prompt)
+                categories = reply.categories
+                parsed = list(categories)
                 padded = max(0, len(batch) - len(categories))
                 while len(categories) < len(batch):
                     categories.append(dict(UNCATEGORIZED))
                 results.extend(categories[:len(batch)])
+                total_padded += padded
+                ms = elapsed_ms(batch_start)
                 log_event(
                     logger, "llm_batch", provider=self.provider, model=self.model,
                     batch=f"{batch_no}/{total_batches}", size=len(batch), ok=True, padded=padded,
-                    ms=elapsed_ms(batch_start),
+                    ms=ms,
                 )
+                agent_trace.write(self.provider, {
+                    **trace, "output": {"results": parsed, "raw": reply.raw}, "padded": padded,
+                    "ms": ms, "attempts": None, "status": "ok", "status_code": None,
+                    "cost": None, "usage": reply.usage,
+                })
             except Exception as e:
                 # Class and HTTP status only, never str(e): SDK error text can carry
                 # key fragments or prompt text, and class + status already separates
                 # auth (401), missing model (404), rate limit (429) and bad JSON.
+                failed_batches += 1
+                ms = elapsed_ms(batch_start)
                 log_event(
                     logger, "llm_batch", level=logging.ERROR, provider=self.provider, model=self.model,
                     batch=f"{batch_no}/{total_batches}", size=len(batch), ok=False,
                     fallback="uncategorized", error=type(e).__name__,
-                    status_code=getattr(e, "status_code", None), ms=elapsed_ms(batch_start),
+                    status_code=getattr(e, "status_code", None), ms=ms,
                 )
+                agent_trace.write(self.provider, {
+                    **trace, "output": None, "padded": None, "ms": ms, "attempts": None,
+                    "status": type(e).__name__, "status_code": getattr(e, "status_code", None),
+                    "cost": None, "usage": None,
+                })
                 results.extend([dict(UNCATEGORIZED) for _ in batch])
+        self.last_run_stats = {
+            "batches": total_batches, "failed_batches": failed_batches, "padded": total_padded,
+        }
         return results
 
     @abstractmethod
-    async def _complete_batch(self, prompt: str) -> list: ...
+    async def _complete_batch(self, prompt: str) -> BatchReply: ...
 
 
 class OpenAiAgent(LlmAgent):
@@ -116,7 +161,7 @@ class OpenAiAgent(LlmAgent):
     def is_configured(self) -> bool:
         return bool(settings.openai_api_key)
 
-    async def _complete_batch(self, prompt: str) -> list:
+    async def _complete_batch(self, prompt: str) -> BatchReply:
         client = AsyncOpenAI(api_key=settings.openai_api_key)
         response = await client.chat.completions.create(
             model=settings.openai_model,
@@ -126,15 +171,16 @@ class OpenAiAgent(LlmAgent):
         )
         content = response.choices[0].message.content or "{}"
         parsed = json.loads(content)
+        usage = _usage(response, "prompt_tokens", "completion_tokens")
         if isinstance(parsed, list):
-            return parsed
+            return BatchReply(parsed, content, usage)
         categories = parsed.get("categories", parsed.get("results", []))
         if not categories:
             for v in parsed.values():
                 if isinstance(v, list):
                     categories = v
                     break
-        return categories
+        return BatchReply(categories, content, usage)
 
 
 class AnthropicAgent(LlmAgent):
@@ -149,7 +195,7 @@ class AnthropicAgent(LlmAgent):
     def is_configured(self) -> bool:
         return bool(settings.anthropic_api_key)
 
-    async def _complete_batch(self, prompt: str) -> list:
+    async def _complete_batch(self, prompt: str) -> BatchReply:
         client = AsyncAnthropic(api_key=settings.anthropic_api_key)
         response = await client.messages.create(
             model=settings.anthropic_model,
@@ -158,4 +204,5 @@ class AnthropicAgent(LlmAgent):
             output_config={"format": {"type": "json_schema", "schema": ANTHROPIC_RESULT_SCHEMA}},
         )
         text = next((block.text for block in response.content if block.type == "text"), "{}")
-        return json.loads(text).get("results", [])
+        categories = json.loads(text).get("results", [])
+        return BatchReply(categories, text, _usage(response, "input_tokens", "output_tokens"))

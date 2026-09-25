@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     recurring_large_threshold: float = 100.0
     # Destructive "clear all data" endpoint — enabled only in dev environments.
     allow_data_reset: bool = False
+    # Directory for per-provider agent trace files; empty disables tracing.
+    agent_log_dir: str = ""
 
     model_config = {"env_file": ".env"}
 

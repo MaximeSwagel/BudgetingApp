@@ -163,11 +163,24 @@ def test_emit_failure_is_silent_on_std_streams(monkeypatch, tmp_path, caplog, ca
     assert agent_trace.enabled() is False
 
 
-def test_records_do_not_propagate(monkeypatch, tmp_path, caplog):
-    caplog.set_level(logging.INFO)
-    _set_dir(monkeypatch, tmp_path)
-    agent_trace.write("openai", {"stage": "batch", "d": "SENSITIVE-DESC"})
-    assert all("SENSITIVE-DESC" not in r.getMessage() for r in caplog.records)
+def test_records_do_not_propagate(monkeypatch, tmp_path):
+    # caplog also hooks non-propagating loggers, so watch the root logger directly.
+    seen = []
+
+    class Spy(logging.Handler):
+        def emit(self, record):
+            seen.append(record.getMessage())
+
+    spy = Spy(logging.NOTSET)
+    root = logging.getLogger()
+    root.addHandler(spy)
+    try:
+        _set_dir(monkeypatch, tmp_path)
+        agent_trace.write("openai", {"stage": "batch", "d": "SENSITIVE-DESC"})
+    finally:
+        root.removeHandler(spy)
+    assert logging.getLogger("agent_trace.openai").propagate is False
+    assert all("SENSITIVE-DESC" not in m for m in seen)
 
 
 def test_prompt_hash_shape():

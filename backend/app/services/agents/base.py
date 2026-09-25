@@ -27,6 +27,8 @@ class CategorizationAgent(ABC):
     provider: str
     label: str
     env_var: str
+    # Optional counts for the llm_categorize log line; agents assign a fresh dict per classify.
+    last_run_stats: dict = {}
 
     @property
     @abstractmethod

@@ -1,12 +1,18 @@
 import logging
+import math
+import re
 import time
 
+from app import agent_trace
 from app.config import settings
 from app.observability import elapsed_ms, log_event
 from app.services.agents.base import UNCATEGORIZED, CategorizationAgent
 from app.services.agents.registry import build_agent
 
 logger = logging.getLogger(__name__)
+
+_STAT_KEY = re.compile(r"[a-z][a-z0-9_]{0,31}")
+_RESERVED_STAT_KEYS = {"event", "provider", "model", "rows", "uncategorized", "ms", "run", "ok", "error", "skipped"}
 
 
 def get_active_agent() -> CategorizationAgent:
@@ -41,31 +47,66 @@ def _guard_contract(results, expected: int) -> list[dict]:
     return items
 
 
+def _safe_stats(raw) -> dict:
+    """Agent stats end up in a log line: keep only well-formed keys with numeric values."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or not _STAT_KEY.fullmatch(key) or key in _RESERVED_STAT_KEYS:
+            continue
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int):
+            out[key] = value
+        elif isinstance(value, float) and math.isfinite(value):
+            out[key] = f"{value:.2f}"
+    return out
+
+
 async def categorize_transactions(transactions: list[dict]) -> list[dict]:
     if not transactions:
         return []
+    with agent_trace.trace_run() as run_id:
+        return await _categorize(transactions, run_id)
 
+
+async def _categorize(transactions: list[dict], run_id: str) -> list[dict]:
     agent = get_active_agent()
+    rows = len(transactions)
     if not agent.is_configured():
         log_event(
             logger, "llm_categorize", level=logging.WARNING, provider=agent.provider, model=agent.model,
-            rows=len(transactions), ok=False, skipped="no_api_key",
+            rows=rows, ok=False, skipped="no_api_key", run=run_id,
         )
+        agent_trace.write(agent.provider, {
+            "model": agent.model, "stage": "run", "rows": rows, "uncategorized": rows,
+            "stats": {}, "ms": 0.0, "status": "no_api_key",
+        })
         return [dict(UNCATEGORIZED) for _ in transactions]
 
     start = time.perf_counter()
+    status = "ok"
+    stats: dict = {}
     try:
         results = await agent.classify(transactions)
+        stats = _safe_stats(getattr(agent, "last_run_stats", None))
     except Exception as e:
+        status = type(e).__name__
         log_event(
             logger, "llm_categorize", level=logging.ERROR, provider=agent.provider, model=agent.model,
-            rows=len(transactions), ok=False, error=type(e).__name__,
+            rows=rows, ok=False, error=status, run=run_id,
         )
         results = []
-    results = _guard_contract(results, len(transactions))
+    results = _guard_contract(results, rows)
     uncategorized = sum(1 for r in results if r.get("general_category") == "Uncategorized")
+    ms = elapsed_ms(start)
     log_event(
-        logger, "llm_categorize", provider=agent.provider, model=agent.model, rows=len(transactions),
-        uncategorized=uncategorized, ms=elapsed_ms(start),
+        logger, "llm_categorize", provider=agent.provider, model=agent.model, rows=rows,
+        uncategorized=uncategorized, **stats, ms=ms, run=run_id,
     )
+    agent_trace.write(agent.provider, {
+        "model": agent.model, "stage": "run", "rows": rows, "uncategorized": uncategorized,
+        "stats": stats, "ms": ms, "status": status,
+    })
     return results
